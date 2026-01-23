@@ -22,26 +22,15 @@ clawdhub install apple-mail-search-safe
 
 ## 📦 Installation
 
-### Option 1: Direct Download
-
+**One-liner:**
 ```bash
-# Download the script
-curl -o /usr/local/bin/mail-search https://raw.githubusercontent.com/gumadeiras/apple-mail-search/main/mail-search
-chmod +x /usr/local/bin/mail-search
+curl -sSL https://raw.githubusercontent.com/gumadeiras/apple-mail-search-cli/master/install.sh | bash
 ```
 
-### Option 2: Clone & Symlink (Recommended)
-
+**Or manually:**
 ```bash
-# Clone the repo
-git clone https://github.com/gumadeiras/apple-mail-search.git
-cd apple-mail-search
-
-# Symlink the script
-sudo ln -sf $(pwd)/mail-search /usr/local/bin/mail-search
-
-# Pull updates
-git pull
+git clone https://github.com/gumadeiras/apple-mail-search-cli.git
+ln -sf ~/apple-mail-search-cli/mail-search ~/.local/bin/mail-search
 ```
 
 ## 🚀 Usage
