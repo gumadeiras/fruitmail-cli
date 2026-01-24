@@ -14,9 +14,10 @@ mkdir -p "${INSTALL_DIR}"
 TEMP_DIR=$(mktemp -d)
 git clone --quiet --depth 1 "${REPO_URL}" "${TEMP_DIR}/apple-mail-search-cli"
 
-# Install script
+# Install script (Copy instead of Link)
 rm -f "${INSTALL_DIR}/${BIN_NAME}"
-ln -sf "${TEMP_DIR}/apple-mail-search-cli/mail-search" "${INSTALL_DIR}/${BIN_NAME}"
+cp "${TEMP_DIR}/apple-mail-search-cli/mail-search" "${INSTALL_DIR}/${BIN_NAME}"
+chmod +x "${INSTALL_DIR}/${BIN_NAME}"
 
 # Cleanup
 rm -rf "${TEMP_DIR}"
