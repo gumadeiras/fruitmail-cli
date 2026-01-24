@@ -19,12 +19,6 @@ Fast SQLite-based search for Apple Mail.app with full body content support.
 curl -sSL https://raw.githubusercontent.com/gumadeiras/apple-mail-search-cli/master/install.sh | bash
 ```
 
-**Or manually:**
-```bash
-git clone https://github.com/gumadeiras/apple-mail-search-cli.git
-ln -sf ~/apple-mail-search-cli/mail-search ~/.local/bin/mail-search
-```
-
 ## 🚀 Usage
 
 ```bash
