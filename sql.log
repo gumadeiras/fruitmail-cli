@@ -1,0 +1,249 @@
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid
+      WHERE 1=1 AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: [-1384190498,20]
+---
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid
+      WHERE 1=1 AND m.read = 0 AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: [1760769502,20]
+---
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid JOIN attachments att ON m.ROWID = att.message
+      WHERE 1=1 AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: [1760769502,20]
+---
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      LEFT JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid
+      WHERE 1=1 AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: [-1384190462,20]
+---
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      LEFT JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid
+      WHERE 1=1 AND m.read = 0 AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: [1760769538,20]
+---
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      LEFT JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid JOIN attachments att ON m.ROWID = att.message
+      WHERE 1=1 AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: [1760769538,20]
+---
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        m.read as is_read,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      LEFT JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid
+      WHERE 1=1 AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: [-1384190433,20]
+---
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        m.read as is_read,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      LEFT JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid
+      WHERE 1=1 AND m.read = 0 AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: [1760769567,20]
+---
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        m.read as is_read,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      LEFT JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid JOIN attachments att ON m.ROWID = att.message
+      WHERE 1=1 AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: [1760769567,20]
+---
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        m.read as is_read,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      LEFT JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid
+      WHERE 1=1 AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: [-1384190408,20]
+---
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        m.read as is_read,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      LEFT JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid
+      WHERE 1=1 AND m.read = 0 AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: [-1384190408,20]
+---
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        m.read as is_read,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      LEFT JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid
+      WHERE 1=1 AND m.read = 0 AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: [1760769592,20]
+---
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        m.read as is_read,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      LEFT JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid JOIN attachments att ON m.ROWID = att.message
+      WHERE 1=1 AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: [1760769592,20]
+---
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        m.read as is_read,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      LEFT JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid
+      WHERE 1=1 AND m.read = 0 AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: [1454049653,20]
+---
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        m.read as is_read,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      LEFT JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid
+      WHERE 1=1 AND s.subject LIKE ? AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: ["%invoice%",1454049653,20]
+---
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        m.read as is_read,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      LEFT JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid
+      WHERE 1=1 AND s.subject LIKE ? AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: ["%prize%",1454049653,20]
+---
+SQL: 
+      SELECT DISTINCT 
+        m.ROWID as id,
+        m.read as is_read,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      LEFT JOIN subjects s ON m.subject = s.rowid LEFT JOIN addresses a ON m.sender = a.rowid JOIN attachments att ON m.ROWID = att.message
+      WHERE 1=1 AND m.date_sent >= ? AND m.deleted = 0
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    
+PARAMS: [1454049653,20]
+---

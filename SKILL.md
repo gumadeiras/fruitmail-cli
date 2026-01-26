@@ -3,7 +3,7 @@ name: apple-mail-search
 description: Fast & safe Apple Mail search with body content support.
 homepage: https://clawdhub.com/mneves75/apple-mail-search
 repository: https://github.com/gumadeiras/apple-mail-search-cli
-metadata: {"clawdbot":{"emoji":"📧","requires":{"bins":["mail-search"]}}}
+metadata: {"clawdbot":{"emoji":"📧","requires":{"bins":["fruitmail"]}}}
 ---
 
 # Apple Mail (Fast & Safe)
@@ -18,38 +18,39 @@ Fast SQLite search for Apple Mail.app emails with body content support.
 
 ## Installation
 
-**Get the script:** [apple-mail-search-cli/mail-search](https://github.com/gumadeiras/apple-mail-search-cli/blob/main/mail-search)
+**Get the script:** [apple-mail-search-cli/fruitmail](https://github.com/gumadeiras/apple-mail-search-cli/blob/main/fruitmail)
 
 **Option 1: Copy to PATH (standard)**
 ```bash
 # Download and copy to your PATH
-cp mail-search /usr/local/bin/
-chmod +x /usr/local/bin/mail-search
+cp fruitmail /usr/local/bin/
+chmod +x /usr/local/bin/fruitmail
 ```
 
 **Option 2: Clone and symlink (recommended)**
 ```bash
 # Clone the repo and symlink the script
 git clone https://github.com/gumadeiras/apple-mail-search-cli.git
-sudo ln -sf $(pwd)/apple-mail-search-cli/mail-search /usr/local/bin/mail-search
+sudo ln -sf $(pwd)/apple-mail-search-cli/fruitmail /usr/local/bin/fruitmail
 # Pull updates with: cd apple-mail-search-cli && git pull
 ```
 
 ## Usage
 
 ```bash
-mail-search subject "invoice"          # Search subjects
-mail-search sender "@amazon.com"       # Search by sender email
-mail-search from-name "John"           # Search by sender name
-mail-search to "recipient@example.com" # Search sent mail
-mail-search unread                     # List unread emails
-mail-search attachments                # List emails with attachments
-mail-search attachment-type pdf        # Find PDFs
-mail-search recent 7                   # Last 7 days
-mail-search date-range 2025-01-01 2025-01-31
-mail-search open 12345                 # Open email in Mail.app
-mail-search body 12345                 # Read full email body (AppleScript)
-mail-search stats                      # Database statistics
+fruitmail search --subject "invoice" --unread # Unified search
+fruitmail subject "invoice"          # Shortcut
+fruitmail sender "@amazon.com"       # Shortcut
+fruitmail from-name "John"           # Shortcut
+fruitmail to "recipient@example.com" # Shortcut
+fruitmail unread                     # Shortcut
+fruitmail attachments                # Shortcut
+fruitmail attachment-type pdf        # Shortcut
+fruitmail recent 7                   # Shortcut
+fruitmail date-range 2025-01-01 2025-01-31
+fruitmail open 12345                 # Open email in Mail.app
+fruitmail body 12345                 # Read full email body (AppleScript)
+fruitmail stats                      # Database statistics
 ```
 
 ## Options
@@ -60,22 +61,23 @@ mail-search stats                      # Database statistics
 -c, --csv         Output as CSV
 -q, --quiet       No headers
 --db PATH         Override database path
+--copy            Force database copy (slower safe mode)
 ```
 
 ## Examples
 
 ```bash
 # Find bank statements from last month
-mail-search subject "statement" -n 50
+fruitmail subject "statement" -n 50
 
 # Get unread emails as JSON for processing
-mail-search unread --json | jq '.[] | .subject'
+fruitmail unread --json | jq '.[] | .subject'
 
 # Find all PDFs from a specific sender
-mail-search sender "@bankofamerica.com" -n 100 | grep -i statement
+fruitmail sender "@bankofamerica.com" -n 100 | grep -i statement
 
 # Export recent emails to CSV
-mail-search recent 30 --csv > recent_emails.csv
+fruitmail recent 30 --csv > recent_emails.csv
 ```
 
 ## Why This Exists
@@ -111,7 +113,7 @@ Apple removed the emlx Spotlight importer in macOS Big Sur. This tool queries th
 For full email body content, use the `body` command:
 
 ```bash
-mail-search body 94695                 # Read single email by ID
+fruitmail body 94695                 # Read single email by ID
 ```
 
 This uses AppleScript to fetch the full content from Mail.app. It's:

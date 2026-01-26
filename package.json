@@ -1,0 +1,53 @@
+{
+  "name": "apple-mail-search-cli",
+  "version": "1.0.0",
+  "description": "Fast SQLite-based search for Apple Mail.app with full body content support.",
+  "main": "dist/index.js",
+  "bin": {
+    "fruitmail": "./bin/fruitmail"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gumadeiras/apple-mail-search-cli.git"
+  },
+  "keywords": [
+    "apple mail",
+    "search",
+    "cli",
+    "sqlite",
+    "macOS"
+  ],
+  "author": "Gustavo Madeira Santana",
+  "license": "ISC",
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/gumadeiras/apple-mail-search-cli/issues"
+  },
+  "homepage": "https://github.com/gumadeiras/apple-mail-search-cli#readme",
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "chalk": "^4.1.2",
+    "cli-table3": "^0.6.5",
+    "commander": "^14.0.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^25.0.10",
+    "@types/sqlite3": "^3.1.11",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6",
+    "typescript": "^5.9.3"
+  }
+}

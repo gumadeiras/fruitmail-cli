@@ -1,4 +1,4 @@
-# Apple Mail Search (Fast & Safe)
+# Fruitmail (Fast & Safe)
 
 Fast SQLite-based search for Apple Mail.app with full body content support.
 
@@ -7,45 +7,44 @@ Fast SQLite-based search for Apple Mail.app with full body content support.
 
 ## ✨ Features
 
-- **⚡ Fast:** ~50ms queries via SQLite (vs 8+ minutes with pure AppleScript)
-- **🔒 Safe:** Copies database to temp file before querying — won't corrupt if Mail.app is running
+- **⚡ Fast:** Direct read-only SQLite access (zero-copy default)
+- **🔒 Safe:** Uses read-only mode by default, or copies DB with `--copy` flag
 - **📧 Body content:** Read full email bodies via AppleScript (fast for a few emails)
 - **🔍 Full search:** Search by subject, sender, recipient, date range, attachments, and more
 
 ## 📦 Installation
-
-**One-liner:**
-```bash
-curl -sSL https://raw.githubusercontent.com/gumadeiras/apple-mail-search-cli/master/install.sh | bash
-```
-
-## 🚀 Usage
-
-```bash
-# Search by subject
-mail-search subject "invoice"
-
-# Search by sender
-mail-search sender "@amazon.com"
-
-# Search by date range
-mail-search date-range 2025-01-01 2025-01-31
-
-# List unread emails
-mail-search unread
-
-# Find emails with PDFs
-mail-search attachment-type pdf
-
-# Read full email body
-mail-search body 94695
-
-# Open in Mail.app
-mail-search open 94695
-
-# Database stats
-mail-search stats
-```
+ 
+ **Using npm (Recommended):**
+ ```bash
+ npm install -g apple-mail-search-cli
+ ```
+ 
+ **Using Bash (Zero dependency):**
+ ```bash
+ curl -sSL https://raw.githubusercontent.com/gumadeiras/apple-mail-search-cli/master/fruitmail | bash
+ ```
+ 
+ ## 🚀 Usage
+ 
+ ```bash
+ # Complex search
+ fruitmail search --subject "invoice" --days 30 --unread
+ 
+ # Search by sender
+ fruitmail sender "@amazon.com"
+ 
+ # List unread emails
+ fruitmail unread
+ 
+ # Read full email body (supports --json)
+ fruitmail body 94695
+ 
+ # Open in Mail.app
+ fruitmail open 94695
+ 
+ # Database stats
+ fruitmail stats
+ ```
 
 ## 📊 Performance
 
@@ -57,8 +56,8 @@ mail-search stats
 ## 🏗️ Technical Details
 
 - **Database:** `~/Library/Mail/V{9,10,11}/MailData/Envelope Index`
-- **Query method:** SQLite (metadata) + AppleScript (body content)
-- **Safety:** Temp file copy prevents DB corruption
+- **Query method:** SQLite (read-only) + AppleScript (body content)
+- **Safety:** Read-only mode prevents modification; optional `--copy` mode available
 
 ## 🔗 ClawdHub
 

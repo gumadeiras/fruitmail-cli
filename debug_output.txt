@@ -1,0 +1,16 @@
+[
+  {
+    "id": 100,
+    "is_read": 0,
+    "date": "2026-01-26 01:39:52",
+    "sender": "no-reply@amazon.com",
+    "subject": "Your Invoice from Amazon"
+  },
+  {
+    "id": 101,
+    "is_read": 1,
+    "date": "2025-12-27 01:39:52",
+    "sender": "mom@example.com",
+    "subject": "Hello Mom"
+  }
+]

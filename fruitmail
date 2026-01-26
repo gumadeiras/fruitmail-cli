@@ -354,5 +354,3 @@ EOF
         exit 1
         ;;
 esac
-curl -sSL https://raw.githubusercontent.com/gumadeiras/apple-mail-search-cli/master/fruitmail -o /usr/local/bin/fruitmail
-chmod +x /usr/local/bin/fruitmail

@@ -1,0 +1,306 @@
+#!/usr/bin/env node
+
+import { Command } from 'commander';
+import chalk from 'chalk';
+import Table from 'cli-table3';
+import Database from 'better-sqlite3';
+import fs from 'node:fs/promises';
+import { copyFileSync, unlinkSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { findDbPath } from './db-finder.js';
+import { getEmailBody, openEmail, openEmailByRowId } from './mail-actions.js';
+
+// Setup CLI
+const program = new Command();
+
+program
+    .name('fruitmail')
+    .description('Fast Apple Mail search via SQLite')
+    .version('1.0.0');
+
+// Global Options
+program
+    .option('-n, --limit <number>', 'Max results', '20')
+    .option('-j, --json', 'Output as JSON')
+    .option('-c, --csv', 'Output as CSV')
+    .option('-q, --quiet', 'Minimal output')
+    .option('--db <path>', 'Override database path')
+    .option('--copy', 'Force copy mode (Legacy Safe Mode)');
+
+// Helper Types
+interface QueryOptions {
+    limit: string;
+    json?: boolean;
+    csv?: boolean;
+    quiet?: boolean;
+    db?: string;
+    copy?: boolean;
+}
+
+// Database Connection Helper
+async function getDb(options: QueryOptions) {
+    let dbPath = options.db;
+    if (!dbPath) {
+        try {
+            dbPath = await findDbPath();
+        } catch (e: any) {
+            console.error(chalk.red(e.message));
+            process.exit(1);
+        }
+    }
+
+    let dbFile = dbPath;
+    let cleanUp: (() => void) | undefined;
+
+    // Copy Mode (Legacy)
+    if (options.copy) {
+        const tempDir = os.tmpdir();
+        const tempFile = path.join(tempDir, `fruitmail.${Date.now()}.db`);
+        // Synchronous copy is fine for startup
+        copyFileSync(dbPath, tempFile);
+        dbFile = tempFile;
+        cleanUp = () => {
+            try {
+                unlinkSync(tempFile);
+            } catch { }
+        };
+    }
+
+    // Open DB
+    // better-sqlite3 handles read-only via options
+    const db = new Database(dbFile, {
+        readonly: !options.copy, // Read-only unless we are working on a copy
+        fileMustExist: true,
+        timeout: 2000 // Busy timeout handled natively
+    });
+
+    // Enable WAL mode support explicitly?
+    // better-sqlite3 usually handles it, but pragma query is safe.
+    // Actually, for read-only on main DB, we just want to read.
+
+    return { db, cleanUp };
+}
+
+// Output Helper
+function outputResults(rows: any[], options: QueryOptions) {
+    if (options.json) {
+        console.log(JSON.stringify(rows, null, 2));
+        return;
+    }
+
+    if (options.csv) {
+        if (rows.length === 0) return;
+        const headers = Object.keys(rows[0]);
+        console.log(headers.join(','));
+        for (const row of rows) {
+            console.log(Object.values(row).map(v => JSON.stringify(v)).join(','));
+        }
+        return;
+    }
+
+    if (rows.length === 0) {
+        if (!options.quiet) console.log(chalk.gray('No results found.'));
+        return;
+    }
+
+    const headers = Object.keys(rows[0]);
+    const table = new Table({
+        head: headers.map(h => chalk.bold(h)),
+        style: { head: ['cyan'] }
+    });
+
+    for (const row of rows) {
+        table.push(Object.values(row).map(v => v !== null ? String(v) : ''));
+    }
+
+    console.log(table.toString());
+}
+
+// Unified Search Builder
+async function runSearch(filters: any, options: QueryOptions) {
+    const { db, cleanUp } = await getDb(options);
+
+    try {
+        const conditions: string[] = ['1=1'];
+        const params: any[] = [];
+        const joins: string[] = [
+            'LEFT JOIN subjects s ON m.subject = s.rowid',
+            'LEFT JOIN addresses a ON m.sender = a.rowid'
+        ];
+
+        // --subject
+        if (filters.subject) {
+            conditions.push('s.subject LIKE ?');
+            params.push(`%${filters.subject}%`);
+        }
+        // --sender
+        if (filters.sender) {
+            conditions.push('a.address LIKE ?');
+            params.push(`%${filters.sender}%`);
+        }
+        // --from-name
+        if (filters.fromName) {
+            conditions.push('a.comment LIKE ?');
+            params.push(`%${filters.fromName}%`);
+        }
+        // --to
+        if (filters.to) {
+            joins.push('JOIN recipients r ON m.ROWID = r.message');
+            joins.push('JOIN addresses ra ON r.address = ra.ROWID');
+            conditions.push('ra.address LIKE ?');
+            params.push(`%${filters.to}%`);
+        }
+        // --unread / --read
+        if (filters.unread) conditions.push('m.read = 0');
+        if (filters.read) conditions.push('m.read = 1');
+
+        // --days
+        if (filters.days) {
+            const seconds = Math.floor(Date.now() / 1000) - (parseInt(filters.days) * 86400);
+            conditions.push('m.date_sent >= ?');
+            params.push(seconds);
+        }
+
+        // --has-attachment / --attachment-type
+        if (filters.hasAttachment || filters.attachmentType) {
+            joins.push('JOIN attachments att ON m.ROWID = att.message');
+        }
+
+        if (filters.attachmentType) {
+            conditions.push('att.name LIKE ?');
+            params.push(`%.${filters.attachmentType}`);
+        }
+
+        // Explicit deleted check
+        conditions.push('m.deleted = 0');
+
+        const sql = `
+      SELECT DISTINCT 
+        m.ROWID as id,
+        datetime(m.date_sent, 'unixepoch', 'localtime') as date,
+        a.address as sender,
+        s.subject
+      FROM messages m
+      ${[...new Set(joins)].join(' ')}
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY m.date_sent DESC
+      LIMIT ?
+    `;
+
+        params.push(parseInt(options.limit));
+
+        // Synchronous execution
+        const rows = db.prepare(sql).all(params);
+        outputResults(rows, options);
+
+    } finally {
+        db.close();
+        if (cleanUp) cleanUp();
+    }
+}
+
+// --- Commands ---
+
+program.command('search')
+    .description('Unified advanced search')
+    .option('--subject <text>', 'Search by subject')
+    .option('--sender <text>', 'Search by sender email')
+    .option('--from-name <text>', 'Search by sender name')
+    .option('--to <text>', 'Search by recipient')
+    .option('--unread', 'Only unread emails')
+    .option('--read', 'Only read emails')
+    .option('--days <number>', 'Days lookback', '7')
+    .option('--has-attachment', 'Only emails with attachments')
+    .option('--attachment-type <ext>', 'Filter by attachment extension (e.g. pdf)')
+    .action(async (opts, cmd) => {
+        runSearch(opts, cmd.optsWithGlobals());
+    });
+
+// Shortcuts
+program.command('subject <pattern>').action((p, opts, cmd) => runSearch({ subject: p }, cmd.optsWithGlobals ? cmd.optsWithGlobals() : opts));
+program.command('sender <pattern>').action((p, opts, cmd) => runSearch({ sender: p }, cmd.optsWithGlobals ? cmd.optsWithGlobals() : opts));
+program.command('to <pattern>').action((p, opts, cmd) => runSearch({ to: p }, cmd.optsWithGlobals ? cmd.optsWithGlobals() : opts));
+program.command('unread').action((options, cmd) => runSearch({ unread: true }, cmd.optsWithGlobals ? cmd.optsWithGlobals() : options));
+
+// Recent
+program.command('recent [days]')
+    .action((days, opts, cmd) => {
+        runSearch({ days: days || '7' }, cmd.optsWithGlobals ? cmd.optsWithGlobals() : opts);
+    });
+
+// Open
+program.command('open <id>')
+    .description('Open email in Mail.app')
+    .action(async (id, options, command) => {
+        const opts = command.optsWithGlobals ? command.optsWithGlobals() : options;
+        const { db, cleanUp } = await getDb(opts);
+        try {
+            // Synchronous
+            const row = db.prepare('SELECT document_id FROM messages WHERE ROWID = ?').get(id) as { document_id: string } | undefined;
+
+            if (!row || !row.document_id) {
+                // Fallback: Try opening via AppleScript using ROWID
+                // This is slower but works for messages where document_id is missing or invalid in DB
+                try {
+                    await openEmailByRowId(id);
+                } catch {
+                    console.error(chalk.red('Message not found (ID invalid or not accessible).'));
+                    process.exit(1);
+                }
+            } else {
+                await openEmail(row.document_id);
+            }
+        } finally {
+            db.close();
+            if (cleanUp) cleanUp();
+        }
+    });
+
+// Body
+program.command('body <id>')
+    .description('Read email body content')
+    .action(async (id, options, command) => {
+        const opts = command.optsWithGlobals ? command.optsWithGlobals() : options;
+        try {
+            const content = await getEmailBody(id);
+            if (opts.json) {
+                console.log(JSON.stringify({ id, body: content }, null, 2));
+            } else {
+                console.log(content);
+            }
+        } catch (e: any) {
+            if (opts.json) {
+                console.log(JSON.stringify({ error: e.message }));
+            } else {
+                console.error(chalk.red(e.message));
+            }
+            process.exit(1);
+        }
+    });
+
+// Stats
+program.command('stats')
+    .description('Database statistics')
+    .action(async (cmdOpts) => {
+        const opts = program.opts();
+        const { db, cleanUp } = await getDb(opts as QueryOptions);
+        try {
+            // Synchronous
+            const total = db.prepare('SELECT COUNT(*) as c FROM messages').get() as { c: number };
+            const unread = db.prepare('SELECT COUNT(*) as c FROM messages WHERE read = 0 AND deleted = 0').get() as { c: number };
+            const deleted = db.prepare('SELECT COUNT(*) as c FROM messages WHERE deleted = 1').get() as { c: number };
+            const attachments = db.prepare('SELECT COUNT(DISTINCT message) as c FROM attachments').get() as { c: number };
+
+            console.log(chalk.bold('=== Mail Database Statistics ==='));
+            console.log(`Total messages: ${chalk.green(total.c)}`);
+            console.log(`Unread:         ${chalk.yellow(unread.c)}`);
+            console.log(`Deleted:        ${chalk.red(deleted.c)}`);
+            console.log(`Attachments:    ${chalk.blue(attachments.c)}`);
+        } finally {
+            db.close();
+            if (cleanUp) cleanUp();
+        }
+    });
+
+program.parse();
