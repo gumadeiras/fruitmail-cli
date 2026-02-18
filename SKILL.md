@@ -1,8 +1,8 @@
 ---
-name: apple-mail-search
+name: fruitmail
 description: Fast & safe Apple Mail search with body content support.
-homepage: https://clawdhub.com/mneves75/apple-mail-search
-repository: https://github.com/gumadeiras/apple-mail-search-cli
+homepage: https://clawdhub.com/mneves75/fruitmail
+repository: https://github.com/gumadeiras/fruitmail-cli
 metadata: {"clawdbot":{"emoji":"📧","requires":{"bins":["fruitmail"]}}}
 ---
 
@@ -18,7 +18,7 @@ Fast SQLite search for Apple Mail.app emails with body content support.
 
 ## Installation
 
-**Get the script:** [apple-mail-search-cli/fruitmail](https://github.com/gumadeiras/apple-mail-search-cli/blob/main/fruitmail)
+**Get the script:** [fruitmail-cli/fruitmail](https://github.com/gumadeiras/fruitmail-cli/blob/main/fruitmail)
 
 **Option 1: Copy to PATH (standard)**
 ```bash
@@ -30,9 +30,9 @@ chmod +x /usr/local/bin/fruitmail
 **Option 2: Clone and symlink (recommended)**
 ```bash
 # Clone the repo and symlink the script
-git clone https://github.com/gumadeiras/apple-mail-search-cli.git
-sudo ln -sf $(pwd)/apple-mail-search-cli/fruitmail /usr/local/bin/fruitmail
-# Pull updates with: cd apple-mail-search-cli && git pull
+git clone https://github.com/gumadeiras/fruitmail-cli.git
+sudo ln -sf $(pwd)/fruitmail-cli/fruitmail /usr/local/bin/fruitmail
+# Pull updates with: cd fruitmail-cli && git pull
 ```
 
 ## Usage

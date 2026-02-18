@@ -1,6 +1,6 @@
 {
   "name": "apple-mail-search-cli",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Fast SQLite-based search for Apple Mail.app with full body content support.",
   "main": "dist/index.js",
   "bin": {
@@ -13,7 +13,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gumadeiras/apple-mail-search-cli.git"
+    "url": "git+https://github.com/gumadeiras/fruitmail-cli.git"
   },
   "keywords": [
     "apple mail",
@@ -32,9 +32,9 @@
   ],
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/gumadeiras/apple-mail-search-cli/issues"
+    "url": "https://github.com/gumadeiras/fruitmail-cli/issues"
   },
-  "homepage": "https://github.com/gumadeiras/apple-mail-search-cli#readme",
+  "homepage": "https://github.com/gumadeiras/fruitmail-cli#readme",
   "dependencies": {
     "better-sqlite3": "^12.6.2",
     "chalk": "^4.1.2",

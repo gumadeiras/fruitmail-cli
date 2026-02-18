@@ -242,13 +242,26 @@ case "$CMD" in
         fi
         MSG_URI=$(sqlite3 "${DB_OPTS[@]}" "$DB_TARGET" "SELECT document_id FROM messages WHERE ROWID = $MSG_ID;")
         if [[ -n "$MSG_URI" ]]; then
-            open "message://%3c${MSG_URI}%3e"
+            if ! open "message://%3c${MSG_URI}%3e"; then
+                echo "Error: Failed to open message in Mail.app." >&2
+                exit 1
+            fi
         else
-            # Fallback for missing document_id
-            osascript << EOF
+            # Fallback for missing document_id: search all mailboxes
+            OPEN_RESULT=$(osascript << EOF
 tell application "Mail"
     try
-        set msg to first message of inbox whose id is $MSG_ID
+        set targetId to $MSG_ID
+        set msg to missing value
+        repeat with mailboxRef in every mailbox
+            try
+                set msg to first message of mailboxRef whose id is targetId
+                exit repeat
+            end try
+        end repeat
+        if msg is missing value then
+            return "ERROR_NOT_FOUND"
+        end if
         open msg
         activate
     on error
@@ -256,6 +269,11 @@ tell application "Mail"
     end try
 end tell
 EOF
+)
+            if [[ "$OPEN_RESULT" == "ERROR_NOT_FOUND" ]]; then
+                echo "Error: Message not found." >&2
+                exit 1
+            fi
         fi
         ;;
 
@@ -270,7 +288,17 @@ EOF
         CONTENT=$(osascript << EOF
 tell application "Mail"
     try
-        set msg to first message of inbox whose id is $MSG_ID
+        set targetId to $MSG_ID
+        set msg to missing value
+        repeat with mailboxRef in every mailbox
+            try
+                set msg to first message of mailboxRef whose id is targetId
+                exit repeat
+            end try
+        end repeat
+        if msg is missing value then
+            return "ERROR_NOT_FOUND"
+        end if
         return content of msg
     on error
         return "ERROR_NOT_FOUND"

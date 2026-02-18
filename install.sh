@@ -19,7 +19,7 @@ if [ ! -d "$TARGET_DIR" ]; then
 fi
 
 # Download script
-if curl -sSL https://raw.githubusercontent.com/gumadeiras/apple-mail-search-cli/master/fruitmail -o "$TARGET_FILE"; then
+if curl -sSL https://raw.githubusercontent.com/gumadeiras/fruitmail-cli/master/fruitmail -o "$TARGET_FILE"; then
     chmod +x "$TARGET_FILE"
     echo "✅ Successfully installed fruitmail to $TARGET_FILE"
     

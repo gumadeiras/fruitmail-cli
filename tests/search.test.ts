@@ -16,7 +16,8 @@ function setupFakeDb(filePath: string) {
       sender INTEGER,
       read INTEGER DEFAULT 1,
       deleted INTEGER DEFAULT 0,
-      document_id TEXT
+      document_id TEXT,
+      mailbox INTEGER
     );
     CREATE TABLE subjects (
         ROWID INTEGER PRIMARY KEY,
@@ -35,6 +36,10 @@ function setupFakeDb(filePath: string) {
         message INTEGER,
         name TEXT
     );
+    CREATE TABLE mailboxes (
+        ROWID INTEGER PRIMARY KEY,
+        display_name TEXT
+    );
   `);
 
     // Insert Data
@@ -43,18 +48,24 @@ function setupFakeDb(filePath: string) {
 
     db.prepare("INSERT INTO subjects (ROWID, subject) VALUES (1, 'Your Invoice from Amazon')").run();
     db.prepare("INSERT INTO addresses (ROWID, address, comment) VALUES (1, 'no-reply@amazon.com', 'Amazon')").run();
-    db.prepare('INSERT INTO messages (ROWID, date_sent, subject, sender, read, deleted) VALUES (100, ?, 1, 1, 0, 0)').run(now);
+    db.prepare("INSERT INTO mailboxes (ROWID, display_name) VALUES (10, 'Inbox')").run();
+    db.prepare("INSERT INTO mailboxes (ROWID, display_name) VALUES (11, 'deleted messages')").run();
+    db.prepare('INSERT INTO messages (ROWID, date_sent, subject, sender, read, deleted, mailbox) VALUES (100, ?, 1, 1, 0, 0, 10)').run(now);
 
     // 2. "Hello Mom" (Read, Old, Attachment)
     const old = now - (30 * 86400); // 30 days ago
     db.prepare("INSERT INTO subjects (ROWID, subject) VALUES (2, 'Hello Mom')").run();
     db.prepare("INSERT INTO addresses (ROWID, address, comment) VALUES (2, 'mom@example.com', 'Mom')").run();
-    db.prepare('INSERT INTO messages (ROWID, date_sent, subject, sender, read, deleted) VALUES (101, ?, 2, 2, 1, 0)').run(old);
+    db.prepare('INSERT INTO messages (ROWID, date_sent, subject, sender, read, deleted, mailbox) VALUES (101, ?, 2, 2, 1, 0, 11)').run(old);
     db.prepare("INSERT INTO attachments (message, name) VALUES (101, 'photo.jpg')").run();
 
     // 3. "Spam" (Deleted)
     db.prepare("INSERT INTO subjects (ROWID, subject) VALUES (3, 'Win a prize')").run();
-    db.prepare('INSERT INTO messages (ROWID, date_sent, subject, sender, read, deleted) VALUES (102, ?, 3, 2, 0, 1)').run(now);
+    db.prepare('INSERT INTO messages (ROWID, date_sent, subject, sender, read, deleted, mailbox) VALUES (102, ?, 3, 2, 0, 1, 10)').run(now);
+
+    // 4. Long subject for width-formatting test
+    db.prepare("INSERT INTO subjects (ROWID, subject) VALUES (4, 'Very long subject that should be truncated to fit in terminal width without breaking the table layout or wrapping lines unexpectedly')").run();
+    db.prepare('INSERT INTO messages (ROWID, date_sent, subject, sender, read, deleted, mailbox) VALUES (103, ?, 4, 1, 1, 0, 11)').run(now);
 
     db.close();
 }
@@ -104,6 +115,7 @@ describe('Integration: Search CLI', () => {
         const json = JSON.parse(out);
         expect(json).toHaveLength(1);
         expect(json[0].sender).toContain('amazon.com');
+        expect(json[0].mailbox).toBe('Inbox');
     });
 
     it('should ignore deleted emails', async () => {
@@ -119,9 +131,23 @@ describe('Integration: Search CLI', () => {
         expect(json[0].subject).toBe('Hello Mom');
     });
 
+    it('should show friendly mailbox names', async () => {
+        const out = await runCli('search --subject "Hello Mom" --days 3650 --json');
+        const json = JSON.parse(out);
+        expect(json).toHaveLength(1);
+        expect(json[0].mailbox).toBe('Trash');
+    });
+
+    it('should keep table lines within default terminal width', async () => {
+        const out = await runCli('search --subject "Very long subject" --days 3650');
+        const lines = out.split('\n').filter(line => line.length > 0);
+        const maxLength = Math.max(...lines.map(line => line.length));
+        expect(maxLength).toBeLessThanOrEqual(120);
+    });
+
     it('should show stats', async () => {
         const out = await runCli('stats');
-        expect(out).toMatch(/Total messages:\s+3/);
+        expect(out).toMatch(/Total messages:\s+4/);
         expect(out).toMatch(/Deleted:\s+1/);
         expect(out).toMatch(/Unread:\s+1/);
     });

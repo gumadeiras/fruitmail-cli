@@ -26,22 +26,162 @@ program
     .option('-c, --csv', 'Output as CSV')
     .option('-q, --quiet', 'Minimal output')
     .option('--db <path>', 'Override database path')
-    .option('--copy', 'Force copy mode (Legacy Safe Mode)');
+    .option('--copy', 'Force copy mode (safe mode)');
+function getErrorMessage(error) {
+    if (error instanceof Error)
+        return error.message;
+    if (typeof error === 'string')
+        return error;
+    return 'Unknown error';
+}
+function handleCommandError(error, options) {
+    const message = getErrorMessage(error);
+    if (options?.json) {
+        console.log(JSON.stringify({ error: message }));
+    }
+    else {
+        console.error(chalk_1.default.red(message));
+    }
+    process.exit(1);
+}
+function getCommandOptions(options, command) {
+    return (command?.optsWithGlobals ? command.optsWithGlobals() : options);
+}
+function quoteIdentifier(identifier) {
+    return `"${identifier.replace(/"/g, '""')}"`;
+}
+function getTableColumns(db, tableName) {
+    try {
+        const rows = db.prepare(`PRAGMA table_info(${quoteIdentifier(tableName)})`).all();
+        return rows.map((row) => row.name);
+    }
+    catch {
+        return [];
+    }
+}
+function findColumnByAlias(columns, aliases) {
+    const columnByLower = new Map(columns.map((column) => [column.toLowerCase(), column]));
+    for (const alias of aliases) {
+        const match = columnByLower.get(alias.toLowerCase());
+        if (match)
+            return match;
+    }
+    return undefined;
+}
+function asNonEmptyString(value) {
+    if (typeof value !== 'string')
+        return undefined;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+}
+function asPositiveInteger(value) {
+    const candidate = typeof value === 'number' ? value : Number(value);
+    if (!Number.isInteger(candidate) || candidate <= 0)
+        return undefined;
+    return candidate;
+}
+function buildMessageLookupContext(db, rowId) {
+    if (!/^\d+$/.test(rowId)) {
+        throw new Error('Invalid message ID');
+    }
+    const messageColumns = getTableColumns(db, 'messages');
+    const selectedColumns = ['m.ROWID as _fruitmail_rowid'];
+    const selectedAliases = [];
+    const joins = [
+        'LEFT JOIN subjects s ON m.subject = s.ROWID',
+        'LEFT JOIN addresses a ON m.sender = a.ROWID'
+    ];
+    const textIdColumns = ['document_id', 'message_id', 'internet_message_id', 'remote_id', 'external_id'];
+    for (const column of textIdColumns) {
+        if (messageColumns.includes(column)) {
+            const alias = `_fruitmail_${column}`;
+            selectedColumns.push(`m.${quoteIdentifier(column)} as ${quoteIdentifier(alias)}`);
+            selectedAliases.push({ column, alias });
+        }
+    }
+    const numericIdColumns = ['id', 'message_id', 'mail_id', 'mailbox_message_id', 'remote_id'];
+    for (const column of numericIdColumns) {
+        if (!messageColumns.includes(column))
+            continue;
+        if (selectedAliases.some((entry) => entry.column === column))
+            continue;
+        const alias = `_fruitmail_${column}`;
+        selectedColumns.push(`m.${quoteIdentifier(column)} as ${quoteIdentifier(alias)}`);
+        selectedAliases.push({ column, alias });
+    }
+    const mailboxHintsAliases = [];
+    const mailboxColumnInMessages = findColumnByAlias(messageColumns, ['mailbox']);
+    const mailboxTableColumns = getTableColumns(db, 'mailboxes');
+    if (mailboxColumnInMessages) {
+        const mailboxAlias = '_fruitmail_mailbox_raw';
+        selectedColumns.push(`m.${quoteIdentifier(mailboxColumnInMessages)} as ${quoteIdentifier(mailboxAlias)}`);
+        mailboxHintsAliases.push(mailboxAlias);
+        if (mailboxTableColumns.length > 0) {
+            joins.push(`LEFT JOIN mailboxes mb ON m.${quoteIdentifier(mailboxColumnInMessages)} = mb.ROWID`);
+            const mailboxHintColumns = ['display_name', 'name', 'path', 'url'];
+            for (const column of mailboxHintColumns) {
+                if (!mailboxTableColumns.includes(column))
+                    continue;
+                const alias = `_fruitmail_mailbox_${column}`;
+                selectedColumns.push(`mb.${quoteIdentifier(column)} as ${quoteIdentifier(alias)}`);
+                mailboxHintsAliases.push(alias);
+            }
+        }
+    }
+    const sql = `
+      SELECT
+        ${selectedColumns.join(', ')},
+        s.subject as _fruitmail_subject,
+        a.address as _fruitmail_sender
+      FROM messages m
+      ${joins.join('\n      ')}
+      WHERE m.ROWID = ?
+    `;
+    const row = db.prepare(sql).get(rowId);
+    if (!row)
+        return undefined;
+    const numericIdCandidates = new Set();
+    const rowIdNumber = asPositiveInteger(row._fruitmail_rowid);
+    if (rowIdNumber)
+        numericIdCandidates.add(rowIdNumber);
+    for (const { column, alias } of selectedAliases) {
+        if (!['id', 'message_id', 'mail_id', 'mailbox_message_id'].includes(column))
+            continue;
+        const numericValue = asPositiveInteger(row[alias]);
+        if (numericValue)
+            numericIdCandidates.add(numericValue);
+    }
+    const messageIdCandidates = new Set();
+    for (const { column, alias } of selectedAliases) {
+        if (!['document_id', 'message_id', 'internet_message_id', 'remote_id', 'external_id'].includes(column))
+            continue;
+        const textValue = asNonEmptyString(row[alias]);
+        if (textValue)
+            messageIdCandidates.add(textValue.replace(/^<|>$/g, ''));
+    }
+    const mailboxHints = new Set();
+    for (const alias of mailboxHintsAliases) {
+        const hint = asNonEmptyString(row[alias]);
+        if (hint)
+            mailboxHints.add(hint);
+    }
+    return {
+        numericIdCandidates: Array.from(numericIdCandidates),
+        messageIdCandidates: Array.from(messageIdCandidates),
+        mailboxHints: Array.from(mailboxHints),
+        subject: asNonEmptyString(row._fruitmail_subject),
+        sender: asNonEmptyString(row._fruitmail_sender)
+    };
+}
 // Database Connection Helper
 async function getDb(options) {
     let dbPath = options.db;
     if (!dbPath) {
-        try {
-            dbPath = await (0, db_finder_js_1.findDbPath)();
-        }
-        catch (e) {
-            console.error(chalk_1.default.red(e.message));
-            process.exit(1);
-        }
+        dbPath = await (0, db_finder_js_1.findDbPath)();
     }
     let dbFile = dbPath;
     let cleanUp;
-    // Copy Mode (Legacy)
+    // Copy Mode (safe mode)
     if (options.copy) {
         const tempDir = node_os_1.default.tmpdir();
         const tempFile = node_path_1.default.join(tempDir, `fruitmail.${Date.now()}.db`);
@@ -67,6 +207,75 @@ async function getDb(options) {
     // Actually, for read-only on main DB, we just want to read.
     return { db, cleanUp };
 }
+function sanitizeCell(value) {
+    return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+function computeColumnWidths(headers, desiredWidths, terminalWidth) {
+    const minWidths = headers.map((header) => {
+        const headerLower = header.toLowerCase();
+        if (headerLower === 'id')
+            return 4;
+        if (headerLower === 'date')
+            return 16;
+        return Math.min(12, Math.max(6, header.length));
+    });
+    const maxTotalContent = Math.max(10, terminalWidth - (headers.length * 3 + 1));
+    const widths = [...minWidths];
+    const minTotal = minWidths.reduce((sum, width) => sum + width, 0);
+    if (minTotal > maxTotalContent) {
+        return headers.map(() => Math.max(1, Math.floor(maxTotalContent / headers.length)));
+    }
+    let remaining = maxTotalContent - minTotal;
+    while (remaining > 0) {
+        let grew = false;
+        for (let i = 0; i < widths.length && remaining > 0; i += 1) {
+            if (widths[i] < desiredWidths[i]) {
+                widths[i] += 1;
+                remaining -= 1;
+                grew = true;
+            }
+        }
+        if (!grew)
+            break;
+    }
+    return widths;
+}
+function toTitleCase(value) {
+    return value.replace(/\w\S*/g, (word) => word[0].toUpperCase() + word.slice(1).toLowerCase());
+}
+function friendlyMailboxName(value) {
+    const raw = sanitizeCell(value);
+    if (!raw)
+        return raw;
+    let normalized = raw;
+    try {
+        normalized = decodeURIComponent(normalized);
+    }
+    catch {
+        // Keep raw string if URL decoding fails.
+    }
+    normalized = normalized.replace(/^[a-z]+:\/\//i, '');
+    const segments = normalized.split('/').map((segment) => segment.trim()).filter(Boolean);
+    let candidate = segments.length > 0 ? segments[segments.length - 1] : normalized;
+    if (candidate.includes(':')) {
+        candidate = candidate.split(':').pop() ?? candidate;
+    }
+    candidate = candidate.replace(/[._-]+/g, ' ').trim();
+    const canonical = candidate.toLowerCase();
+    if (canonical === 'inbox')
+        return 'Inbox';
+    if (canonical === 'sent' || canonical === 'sent messages')
+        return 'Sent';
+    if (canonical === 'drafts')
+        return 'Drafts';
+    if (canonical === 'deleted messages' || canonical === 'trash')
+        return 'Trash';
+    if (canonical === 'junk' || canonical === 'junk mail' || canonical === 'spam')
+        return 'Junk';
+    if (canonical === 'archive' || canonical === 'archives')
+        return 'Archive';
+    return toTitleCase(candidate);
+}
 // Output Helper
 function outputResults(rows, options) {
     if (options.json) {
@@ -89,12 +298,25 @@ function outputResults(rows, options) {
         return;
     }
     const headers = Object.keys(rows[0]);
-    const table = new cli_table3_1.default({
-        head: headers.map(h => chalk_1.default.bold(h)),
-        style: { head: ['cyan'] }
+    const sanitizedRows = rows.map((row) => headers.map((header) => sanitizeCell(row[header])));
+    const desiredWidths = headers.map((header, index) => {
+        let maxWidth = header.length;
+        for (const rowValues of sanitizedRows) {
+            maxWidth = Math.max(maxWidth, rowValues[index].length);
+        }
+        return maxWidth;
     });
-    for (const row of rows) {
-        table.push(Object.values(row).map(v => v !== null ? String(v) : ''));
+    const terminalWidth = process.stdout.columns ?? 120;
+    const contentWidths = computeColumnWidths(headers, desiredWidths, terminalWidth);
+    const colWidths = contentWidths.map((width) => width + 2); // +2 for left/right cell padding
+    const table = new cli_table3_1.default({
+        head: headers.map((header) => chalk_1.default.bold(header)),
+        colWidths,
+        wordWrap: false,
+        style: { head: ['cyan'], compact: false }
+    });
+    for (const rowValues of sanitizedRows) {
+        table.push(rowValues);
     }
     console.log(table.toString());
 }
@@ -108,6 +330,22 @@ async function runSearch(filters, options) {
             'LEFT JOIN subjects s ON m.subject = s.rowid',
             'LEFT JOIN addresses a ON m.sender = a.rowid'
         ];
+        let mailboxSelect = '';
+        const messageColumns = getTableColumns(db, 'messages');
+        const mailboxColumnInMessages = findColumnByAlias(messageColumns, ['mailbox']);
+        const mailboxColumns = getTableColumns(db, 'mailboxes');
+        if (mailboxColumnInMessages) {
+            const quotedMailboxColumn = quoteIdentifier(mailboxColumnInMessages);
+            const mailboxLabelColumn = mailboxColumns.length > 0
+                ? findColumnByAlias(mailboxColumns, ['display_name', 'name', 'path', 'url'])
+                : undefined;
+            if (mailboxColumns.length > 0) {
+                joins.push(`LEFT JOIN mailboxes mb ON m.${quotedMailboxColumn} = mb.ROWID`);
+            }
+            mailboxSelect = mailboxLabelColumn
+                ? `,\n        COALESCE(mb.${quoteIdentifier(mailboxLabelColumn)}, CAST(m.${quotedMailboxColumn} AS TEXT)) as mailbox`
+                : `,\n        CAST(m.${quotedMailboxColumn} AS TEXT) as mailbox`;
+        }
         // --subject
         if (filters.subject) {
             conditions.push('s.subject LIKE ?');
@@ -156,7 +394,7 @@ async function runSearch(filters, options) {
         m.ROWID as id,
         datetime(m.date_sent, 'unixepoch', 'localtime') as date,
         a.address as sender,
-        s.subject
+        s.subject${mailboxSelect}
       FROM messages m
       ${[...new Set(joins)].join(' ')}
       WHERE ${conditions.join(' AND ')}
@@ -166,7 +404,12 @@ async function runSearch(filters, options) {
         params.push(parseInt(options.limit));
         // Synchronous execution
         const rows = db.prepare(sql).all(params);
-        outputResults(rows, options);
+        const normalizedRows = rows.map((row) => {
+            if (!Object.prototype.hasOwnProperty.call(row, 'mailbox'))
+                return row;
+            return { ...row, mailbox: friendlyMailboxName(row.mailbox) };
+        });
+        outputResults(normalizedRows, options);
     }
     finally {
         db.close();
@@ -187,94 +430,173 @@ program.command('search')
     .option('--has-attachment', 'Only emails with attachments')
     .option('--attachment-type <ext>', 'Filter by attachment extension (e.g. pdf)')
     .action(async (opts, cmd) => {
-    runSearch(opts, cmd.optsWithGlobals());
+    const commandOptions = cmd.optsWithGlobals();
+    try {
+        await runSearch(opts, commandOptions);
+    }
+    catch (error) {
+        handleCommandError(error, commandOptions);
+    }
 });
 // Shortcuts
-program.command('subject <pattern>').action((p, opts, cmd) => runSearch({ subject: p }, cmd.optsWithGlobals ? cmd.optsWithGlobals() : opts));
-program.command('sender <pattern>').action((p, opts, cmd) => runSearch({ sender: p }, cmd.optsWithGlobals ? cmd.optsWithGlobals() : opts));
-program.command('to <pattern>').action((p, opts, cmd) => runSearch({ to: p }, cmd.optsWithGlobals ? cmd.optsWithGlobals() : opts));
-program.command('unread').action((options, cmd) => runSearch({ unread: true }, cmd.optsWithGlobals ? cmd.optsWithGlobals() : options));
+program.command('subject <pattern>').action(async (p, options, command) => {
+    const opts = getCommandOptions(options, command);
+    try {
+        await runSearch({ subject: p }, opts);
+    }
+    catch (error) {
+        handleCommandError(error, opts);
+    }
+});
+program.command('sender <pattern>').action(async (p, options, command) => {
+    const opts = getCommandOptions(options, command);
+    try {
+        await runSearch({ sender: p }, opts);
+    }
+    catch (error) {
+        handleCommandError(error, opts);
+    }
+});
+program.command('to <pattern>').action(async (p, options, command) => {
+    const opts = getCommandOptions(options, command);
+    try {
+        await runSearch({ to: p }, opts);
+    }
+    catch (error) {
+        handleCommandError(error, opts);
+    }
+});
+program.command('unread').action(async (options, command) => {
+    const opts = getCommandOptions(options, command);
+    try {
+        await runSearch({ unread: true }, opts);
+    }
+    catch (error) {
+        handleCommandError(error, opts);
+    }
+});
 // Recent
 program.command('recent [days]')
-    .action((days, opts, cmd) => {
-    runSearch({ days: days || '7' }, cmd.optsWithGlobals ? cmd.optsWithGlobals() : opts);
+    .action(async (days, options, command) => {
+    const opts = getCommandOptions(options, command);
+    try {
+        await runSearch({ days: days || '7' }, opts);
+    }
+    catch (error) {
+        handleCommandError(error, opts);
+    }
 });
 // Open
 program.command('open <id>')
     .description('Open email in Mail.app')
     .action(async (id, options, command) => {
-    const opts = command.optsWithGlobals ? command.optsWithGlobals() : options;
-    const { db, cleanUp } = await getDb(opts);
+    const opts = getCommandOptions(options, command);
     try {
-        // Synchronous
-        const row = db.prepare('SELECT document_id FROM messages WHERE ROWID = ?').get(id);
-        if (!row || !row.document_id) {
-            // Fallback: Try opening via AppleScript using ROWID
-            // This is slower but works for messages where document_id is missing or invalid in DB
+        const numericId = Number.parseInt(String(id), 10);
+        if (!Number.isNaN(numericId) && /^\d+$/.test(String(id))) {
             try {
-                await (0, mail_actions_js_1.openEmailByRowId)(id);
+                await (0, mail_actions_js_1.openEmailByLookup)({ numericIdCandidates: [numericId] });
+                return;
             }
-            catch {
-                console.error(chalk_1.default.red('Message not found (ID invalid or not accessible).'));
-                process.exit(1);
+            catch (error) {
+                if (getErrorMessage(error) !== 'Message not found') {
+                    throw error;
+                }
             }
         }
-        else {
-            await (0, mail_actions_js_1.openEmail)(row.document_id);
+        const { db, cleanUp } = await getDb(opts);
+        try {
+            const lookup = buildMessageLookupContext(db, String(id));
+            if (!lookup)
+                throw new Error('Message not found');
+            await (0, mail_actions_js_1.openEmailByLookup)(lookup);
+        }
+        finally {
+            db.close();
+            if (cleanUp)
+                cleanUp();
         }
     }
-    finally {
-        db.close();
-        if (cleanUp)
-            cleanUp();
+    catch (error) {
+        handleCommandError(error, opts);
     }
 });
 // Body
 program.command('body <id>')
     .description('Read email body content')
     .action(async (id, options, command) => {
-    const opts = command.optsWithGlobals ? command.optsWithGlobals() : options;
+    const opts = getCommandOptions(options, command);
     try {
-        const content = await (0, mail_actions_js_1.getEmailBody)(id);
-        if (opts.json) {
-            console.log(JSON.stringify({ id, body: content }, null, 2));
+        const numericId = Number.parseInt(String(id), 10);
+        if (!Number.isNaN(numericId) && /^\d+$/.test(String(id))) {
+            try {
+                const content = await (0, mail_actions_js_1.getEmailBodyByLookup)({ numericIdCandidates: [numericId] });
+                if (opts.json) {
+                    console.log(JSON.stringify({ id, body: content }, null, 2));
+                }
+                else {
+                    console.log(content);
+                }
+                return;
+            }
+            catch (error) {
+                if (getErrorMessage(error) !== 'Message not found') {
+                    throw error;
+                }
+            }
         }
-        else {
-            console.log(content);
+        const { db, cleanUp } = await getDb(opts);
+        try {
+            const lookup = buildMessageLookupContext(db, String(id));
+            if (!lookup)
+                throw new Error('Message not found');
+            const content = await (0, mail_actions_js_1.getEmailBodyByLookup)(lookup);
+            if (opts.json) {
+                console.log(JSON.stringify({ id, body: content }, null, 2));
+            }
+            else {
+                console.log(content);
+            }
+        }
+        finally {
+            db.close();
+            if (cleanUp)
+                cleanUp();
         }
     }
-    catch (e) {
-        if (opts.json) {
-            console.log(JSON.stringify({ error: e.message }));
-        }
-        else {
-            console.error(chalk_1.default.red(e.message));
-        }
-        process.exit(1);
+    catch (error) {
+        handleCommandError(error, opts);
     }
 });
 // Stats
 program.command('stats')
     .description('Database statistics')
-    .action(async (cmdOpts) => {
-    const opts = program.opts();
-    const { db, cleanUp } = await getDb(opts);
+    .action(async (options, command) => {
+    const opts = getCommandOptions(options, command);
     try {
-        // Synchronous
-        const total = db.prepare('SELECT COUNT(*) as c FROM messages').get();
-        const unread = db.prepare('SELECT COUNT(*) as c FROM messages WHERE read = 0 AND deleted = 0').get();
-        const deleted = db.prepare('SELECT COUNT(*) as c FROM messages WHERE deleted = 1').get();
-        const attachments = db.prepare('SELECT COUNT(DISTINCT message) as c FROM attachments').get();
-        console.log(chalk_1.default.bold('=== Mail Database Statistics ==='));
-        console.log(`Total messages: ${chalk_1.default.green(total.c)}`);
-        console.log(`Unread:         ${chalk_1.default.yellow(unread.c)}`);
-        console.log(`Deleted:        ${chalk_1.default.red(deleted.c)}`);
-        console.log(`Attachments:    ${chalk_1.default.blue(attachments.c)}`);
+        const { db, cleanUp } = await getDb(opts);
+        try {
+            // Synchronous
+            const total = db.prepare('SELECT COUNT(*) as c FROM messages').get();
+            const unread = db.prepare('SELECT COUNT(*) as c FROM messages WHERE read = 0 AND deleted = 0').get();
+            const deleted = db.prepare('SELECT COUNT(*) as c FROM messages WHERE deleted = 1').get();
+            const attachments = db.prepare('SELECT COUNT(DISTINCT message) as c FROM attachments').get();
+            console.log(chalk_1.default.bold('=== Mail Database Statistics ==='));
+            console.log(`Total messages: ${chalk_1.default.green(total.c)}`);
+            console.log(`Unread:         ${chalk_1.default.yellow(unread.c)}`);
+            console.log(`Deleted:        ${chalk_1.default.red(deleted.c)}`);
+            console.log(`Attachments:    ${chalk_1.default.blue(attachments.c)}`);
+        }
+        finally {
+            db.close();
+            if (cleanUp)
+                cleanUp();
+        }
     }
-    finally {
-        db.close();
-        if (cleanUp)
-            cleanUp();
+    catch (error) {
+        handleCommandError(error, opts);
     }
 });
-program.parse();
+program.parseAsync(process.argv).catch((error) => {
+    handleCommandError(error, program.opts());
+});
