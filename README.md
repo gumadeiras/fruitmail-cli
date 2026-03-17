@@ -59,12 +59,12 @@ Fast SQLite-based search for Apple Mail.app with full body content support.
 - **Query method:** SQLite (read-only) + AppleScript (body content)
 - **Safety:** Read-only mode prevents modification; optional `--copy` mode available
 
-## 🔗 ClawdHub
+## 🔗 ClawHub
 
 Available as a skill on [ClawHub](https://clawhub.ai/gumadeiras/apple-mail-search-safe) for [OpenClaw](https://github.com/openclaw/openclaw) users. Install with:
 
 ```bash
-clawdhub install fruitmail-safe
+clawhub install fruitmail-safe
 ```
 
 ## 📝 License
