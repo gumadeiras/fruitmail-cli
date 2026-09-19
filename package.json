@@ -1,6 +1,6 @@
 {
   "name": "fruitmail",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Fast SQLite-based search for Apple Mail.app with full body content support.",
   "main": "dist/index.js",
   "bin": {
