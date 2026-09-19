@@ -19,3 +19,14 @@ export function findColumnByAlias(columns: string[], aliases: string[]): string 
     }
     return undefined;
 }
+
+/** Envelope Index `messages.flags` bits that Mail keeps in sync with IMAP and Exchange state. */
+export const MESSAGE_FLAG_ANSWERED = 1 << 2;
+export const MESSAGE_FLAG_FLAGGED = 1 << 4;
+
+/** Envelope Index dates are Unix seconds; return ISO 8601 or an empty string for missing values. */
+export function unixSecondsToIso(value: unknown): string {
+    const seconds = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(seconds) || seconds <= 0) return '';
+    return new Date(Math.round(seconds * 1000)).toISOString();
+}

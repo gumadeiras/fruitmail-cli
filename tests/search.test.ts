@@ -4,6 +4,58 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 
+const ACCOUNT_UUID = 'D0BC0D42-80B6-4DB9-A259-B1FC1D3E957A';
+const STORE_UUID = '30D9C098-2799-4510-9026-38C155C6FDD6';
+const RECEIVED_SECONDS = Math.floor(Date.UTC(2026, 8, 18, 14, 0, 0) / 1000);
+const RECEIVED_ISO = '2026-09-18T14:00:00.000Z';
+
+function emlx(message: string): string {
+    const body = message.replace(/\n/g, '\r\n');
+    return `${Buffer.byteLength(body)}\n${body}<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>flags</key><integer>1</integer></dict></plist>\n`;
+}
+
+// Writes emlx files where Mail stores them: <root>/<account>/<mailbox>.mbox/<store>/Data/<digits>/Messages/<id>.emlx
+function setupFakeMailStore(mailRoot: string) {
+    const inbox = path.join(mailRoot, ACCOUNT_UUID, 'Inbox.mbox', STORE_UUID, 'Data');
+    // Row IDs 157897 and 157898 share the digit directory 7/5/1 (157 reversed).
+    const messages = path.join(inbox, '7', '5', '1', 'Messages');
+    fs.mkdirSync(messages, { recursive: true });
+    fs.writeFileSync(path.join(messages, '157897.emlx'), emlx([
+        'From: "Person, Some" <person@example.com>',
+        'To: Gustavo <gustavo@example.com>, second@example.com',
+        'Cc: copy@example.com',
+        'Subject: =?UTF-8?Q?Revis=C3=A3o_urgente?=',
+        'Message-ID: <request@example.com>',
+        'References: <first@example.com>',
+        ' <second@example.com>',
+        'List-Id: trainees.example',
+        'MIME-Version: 1.0',
+        'Content-Type: multipart/alternative; boundary="b1"',
+        '',
+        '--b1',
+        'Content-Type: text/plain; charset=utf-8',
+        'Content-Transfer-Encoding: quoted-printable',
+        '',
+        'Please review by Friday. Obrigado, at=C3=A9 j=C3=A1.',
+        '--b1',
+        'Content-Type: text/html; charset=utf-8',
+        '',
+        '<p>Please review by <b>Friday</b>.</p>',
+        '--b1--',
+        ''
+    ].join('\n')));
+    fs.writeFileSync(path.join(messages, '157898.partial.emlx'), emlx([
+        'From: notices@example.com',
+        'To: gustavo@example.com',
+        'Subject: HTML only',
+        'Message-ID: <html-only@example.com>',
+        'Content-Type: text/html; charset=utf-8',
+        '',
+        '<html><body><p>First paragraph.</p><p>Second <a href="https://tracker.example/x">link</a>.</p></body></html>',
+        ''
+    ].join('\n')));
+}
+
 // Helper to create a fake DB with Apple Mail schema
 function setupFakeDb(filePath: string) {
     const db = new DatabaseSync(filePath);
@@ -13,6 +65,7 @@ function setupFakeDb(filePath: string) {
     CREATE TABLE messages (
       ROWID INTEGER PRIMARY KEY,
       date_sent INTEGER,
+      date_received INTEGER,
       subject INTEGER,
       sender INTEGER,
       read INTEGER DEFAULT 1,
@@ -42,7 +95,8 @@ function setupFakeDb(filePath: string) {
     );
     CREATE TABLE mailboxes (
         ROWID INTEGER PRIMARY KEY,
-        display_name TEXT
+        display_name TEXT,
+        url TEXT
     );
     CREATE TABLE labels (
         message_id INTEGER,
@@ -57,9 +111,9 @@ function setupFakeDb(filePath: string) {
     db.prepare("INSERT INTO subjects (ROWID, subject) VALUES (1, 'Your Invoice from Amazon')").run();
     db.prepare("INSERT INTO addresses (ROWID, address, comment) VALUES (1, 'no-reply@amazon.com', 'Amazon')").run();
     db.prepare("INSERT INTO addresses (ROWID, address, comment) VALUES (3, 'billing@example.com', 'Billing')").run();
-    db.prepare("INSERT INTO mailboxes (ROWID, display_name) VALUES (10, 'Inbox')").run();
-    db.prepare("INSERT INTO mailboxes (ROWID, display_name) VALUES (11, 'deleted messages')").run();
-    db.prepare('INSERT INTO messages (ROWID, date_sent, subject, sender, read, deleted, flags, flag_color, remote_id, mailbox) VALUES (100, ?, 1, 1, 0, 0, 4, 1, 8559239795323845908, 10)').run(now);
+    db.prepare("INSERT INTO mailboxes (ROWID, display_name, url) VALUES (10, 'Inbox', ?)").run(`ews://${ACCOUNT_UUID}/Inbox`);
+    db.prepare("INSERT INTO mailboxes (ROWID, display_name, url) VALUES (11, 'deleted messages', ?)").run(`ews://${ACCOUNT_UUID}/Deleted%20Messages`);
+    db.prepare('INSERT INTO messages (ROWID, date_sent, date_received, subject, sender, read, deleted, flags, flag_color, remote_id, mailbox) VALUES (100, ?, ?, 1, 1, 0, 0, 20, 1, 8559239795323845908, 10)').run(now, RECEIVED_SECONDS);
     db.prepare('INSERT INTO recipients (message, address) VALUES (100, 3)').run();
 
     // 2. "Hello Mom" (Read, Old, Attachment)
@@ -78,18 +132,26 @@ function setupFakeDb(filePath: string) {
     db.prepare('INSERT INTO messages (ROWID, date_sent, subject, sender, read, deleted, mailbox) VALUES (103, ?, 4, 1, 1, 0, 11)').run(now);
     db.prepare('INSERT INTO labels (message_id, mailbox_id) VALUES (103, 10)').run();
 
+    // 5. Local-store messages: an answered multipart message and a partial (attachments removed) HTML-only message.
+    const ancient = now - (4000 * 86400);
+    db.prepare("INSERT INTO subjects (ROWID, subject) VALUES (5, 'Local subject')").run();
+    db.prepare('INSERT INTO messages (ROWID, date_sent, date_received, subject, sender, read, deleted, flags, mailbox) VALUES (157897, ?, ?, 5, 1, 1, 0, 5, 10)').run(ancient, RECEIVED_SECONDS);
+    db.prepare('INSERT INTO messages (ROWID, date_sent, date_received, subject, sender, read, deleted, flags, mailbox) VALUES (157898, ?, ?, 5, 1, 1, 0, 1, 10)').run(ancient, RECEIVED_SECONDS);
+
     db.close();
 }
 
 describe('Integration: Search CLI', () => {
-    const tempDb = path.join(__dirname, 'test.db');
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'fruitmail-mail-root-'));
+    const tempDb = path.join(tempRoot, 'MailData', 'Envelope Index');
     let tempBinDir = '';
     const binPath = path.resolve(__dirname, '../bin/fruitmail');
 
     beforeAll(() => {
         process.env.FORCE_COLOR = '0'; // Disable chalk colors
-        try { fs.unlinkSync(tempDb); } catch { }
+        fs.mkdirSync(path.dirname(tempDb), { recursive: true });
         setupFakeDb(tempDb);
+        setupFakeMailStore(tempRoot);
 
         tempBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fruitmail-test-bin-'));
         const osascriptPath = path.join(tempBinDir, 'osascript');
@@ -99,16 +161,17 @@ if [[ "$payload" != *"-e"* ]]; then
   payload="$(cat)"
 fi
 case "$payload" in
+  *'set expectedMessageId to "wrong@example.com"'*) printf '__FRUITMAIL_IDENTITY_MISMATCH__' ;;
   *"return (isFlagged as text)"*) printf 'true|0' ;;
-  *"makeInspectionJson"*) printf '%s' '{"messageId":"invoice@example.com","subject":"Your Invoice from Amazon","sender":"no-reply@amazon.com","recipients":["billing@example.com"],"dateReceived":"Friday, September 18, 2026 at 10:00:00 AM","mailbox":"Inbox","body":"Mock Body","headers":"Message-ID: <invoice@example.com>","wasRepliedTo":false,"flagIndex":-1}' ;;
-  *"set targetFlagIndex to 0"*) printf 'red|0|true' ;;
-  *"set targetFlagIndex to 1"*) printf 'orange|1|true' ;;
-  *"set targetFlagIndex to 2"*) printf 'yellow|2|true' ;;
-  *"set targetFlagIndex to 3"*) printf 'green|3|true' ;;
-  *"set targetFlagIndex to 4"*) printf 'blue|4|true' ;;
-  *"set targetFlagIndex to 5"*) printf 'purple|5|true' ;;
-  *"set targetFlagIndex to 6"*) printf 'gray|6|true' ;;
-  *"set targetFlagIndex to -1"*) printf 'none|-1|false' ;;
+  *"makeInspectionJson"*) printf '%s' '{"messageId":"invoice@example.com","subject":"Your Invoice from Amazon","sender":"no-reply@amazon.com","recipients":["billing@example.com"],"mailbox":"Inbox","body":"Mock Body","headers":"Message-ID: <invoice@example.com>","wasRepliedTo":false,"flagIndex":-1}' ;;
+  *"set targetFlagIndex to 0"*) printf 'red|0|true|-1' ;;
+  *"set targetFlagIndex to 1"*) printf 'orange|1|true|-1' ;;
+  *"set targetFlagIndex to 2"*) printf 'yellow|2|true|-1' ;;
+  *"set targetFlagIndex to 3"*) printf 'green|3|true|-1' ;;
+  *"set targetFlagIndex to 4"*) printf 'blue|4|true|-1' ;;
+  *"set targetFlagIndex to 5"*) printf 'purple|5|true|-1' ;;
+  *"set targetFlagIndex to 6"*) printf 'gray|6|true|-1' ;;
+  *"set targetFlagIndex to -1"*) printf 'none|-1|false|-1' ;;
   *"return content of foundMsg"*|*"return content of msg"*) printf 'Mock Body' ;;
   *"open foundMsg"*|*"open msg"*) printf 'OK' ;;
   *) printf '__FRUITMAIL_NOT_FOUND__' ;;
@@ -124,7 +187,7 @@ exit 0
     });
 
     afterAll(() => {
-        try { fs.unlinkSync(tempDb); } catch { }
+        try { fs.rmSync(tempRoot, { recursive: true, force: true }); } catch { }
         if (tempBinDir) {
             try { fs.rmSync(tempBinDir, { recursive: true, force: true }); } catch { }
         }
@@ -242,7 +305,7 @@ exit 0
             subject: 'Your Invoice from Amazon',
             sender: 'no-reply@amazon.com',
             recipients: ['billing@example.com'],
-            dateReceived: 'Friday, September 18, 2026 at 10:00:00 AM',
+            dateReceived: RECEIVED_ISO,
             mailbox: 'Inbox',
             body: 'Mock Body',
             headers: 'Message-ID: <invoice@example.com>',
@@ -256,7 +319,47 @@ exit 0
         ['blue', 4], ['purple', 5], ['gray', 6], ['none', -1]
     ])('sets the %s flag with JSON output', async (color, flagIndex) => {
         const result = await parseJson(`set-flag 100 ${color} --json`);
-        expect(result).toEqual({ id: 100, ok: true, color, flagIndex, changed: color !== 'none' });
+        expect(result).toEqual({ id: 100, ok: true, color, flagIndex, previousFlagIndex: -1, changed: color !== 'none' });
+    });
+
+    it('refuses to change a flag when the expected Message-ID does not match', async () => {
+        await expect(runCliJsonFailure('set-flag 100 red --expect-message-id wrong@example.com --json')).resolves.toEqual({
+            error: 'Message identity mismatch'
+        });
+        await expect(parseJson('set-flag 100 red --expect-message-id invoice@example.com --json')).resolves.toMatchObject({ ok: true, changed: true });
+    });
+
+    it('reads messages from the local store without Mail.app', async () => {
+        const results = await parseJson('read 157897 157898 100 102 999 --json');
+        expect(results).toHaveLength(5);
+        expect(results[0]).toEqual({
+            id: 157897,
+            messageId: 'request@example.com',
+            subject: 'Revisão urgente',
+            sender: '"Person, Some" <person@example.com>',
+            recipients: ['gustavo@example.com', 'second@example.com', 'copy@example.com'],
+            dateReceived: RECEIVED_ISO,
+            mailbox: 'Inbox',
+            body: 'Please review by Friday. Obrigado, até já.',
+            headers: expect.stringContaining('References: <first@example.com>\r\n <second@example.com>'),
+            wasRepliedTo: true,
+            flagIndex: -1
+        });
+        expect(results[0].headers).toContain('List-Id: trainees.example');
+        expect(results[1]).toMatchObject({
+            id: 157898,
+            messageId: 'html-only@example.com',
+            subject: 'HTML only',
+            body: 'First paragraph.\n\nSecond link [https://tracker.example/x].',
+            wasRepliedTo: false
+        });
+        expect(results[2]).toEqual({ id: 100, error: 'No local message file' });
+        expect(results[3]).toEqual({ id: 102, error: 'Message not found' });
+        expect(results[4]).toEqual({ id: 999, error: 'Message not found' });
+    });
+
+    it('rejects invalid read inputs as JSON', async () => {
+        await expect(runCliJsonFailure('read 12 abc --json')).resolves.toEqual({ error: 'Invalid message ID' });
     });
 
     it('rejects invalid inspect and set-flag inputs as JSON', async () => {
@@ -269,7 +372,7 @@ exit 0
 
     it('counts all colored flags without exposing message content', async () => {
         await expect(parseJson('flag-counts --json')).resolves.toEqual({
-            totalMessages: 3,
+            totalMessages: 5,
             flaggedMessages: 1,
             colors: { red: 1, orange: 0, yellow: 0, green: 0, blue: 0, purple: 0, gray: 0 },
             unresolved: 0
@@ -278,7 +381,7 @@ exit 0
 
     it('scopes flag counts to All Inboxes', async () => {
         await expect(parseJson('flag-counts --inbox --json')).resolves.toEqual({
-            totalMessages: 2,
+            totalMessages: 4,
             flaggedMessages: 1,
             colors: { red: 1, orange: 0, yellow: 0, green: 0, blue: 0, purple: 0, gray: 0 },
             unresolved: 0
@@ -286,7 +389,7 @@ exit 0
     });
 
     it('should run raw queries in the Bash CLI', async () => {
-        await expect(runShellCli('query "SELECT COUNT(*) AS total FROM messages;" --json')).resolves.toBe('[{"total":4}]');
+        await expect(runShellCli('query "SELECT COUNT(*) AS total FROM messages;" --json')).resolves.toBe('[{"total":6}]');
     });
 
     it.each([
@@ -305,7 +408,7 @@ exit 0
 
     it('should expose Bash CLI help and stats', async () => {
         await expect(runShellCli('--help')).resolves.toContain('fruitmail search --subject "invoice"');
-        await expect(runShellCli('stats')).resolves.toMatch(/Total messages:\s+4/);
+        await expect(runShellCli('stats')).resolves.toMatch(/Total messages:\s+6/);
     });
 
     it('should route Bash CLI body and open commands through AppleScript', async () => {
@@ -370,7 +473,7 @@ exit 0
 
     it('should show stats', async () => {
         const out = await runCli('stats');
-        expect(out).toMatch(/Total messages:\s+4/);
+        expect(out).toMatch(/Total messages:\s+6/);
         expect(out).toMatch(/Deleted:\s+1/);
         expect(out).toMatch(/Unread:\s+1/);
     });

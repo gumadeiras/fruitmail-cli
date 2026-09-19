@@ -10,20 +10,36 @@ import {
     openEmailByRowId,
     setEmailFlagByLookup
 } from '../src/mail-actions';
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
+import { execFile } from 'node:child_process';
 
-// Mock exec
 jest.mock('node:child_process', () => ({
-    exec: jest.fn(),
-}));
-
-jest.mock('node:util', () => ({
-    promisify: (fn: any) => fn,
+    execFile: jest.fn(),
 }));
 
 describe('Mail Actions', () => {
-    const mockExec = exec as unknown as jest.Mock;
+    const mockExecFile = execFile as unknown as jest.Mock;
+    const fakeChild = { kill: jest.fn() };
+
+    function mailReturns(stdout: string) {
+        mockExecFile.mockImplementation((_file: string, _args: string[], _options: unknown, callback: Function) => {
+            callback(null, stdout, '');
+            return fakeChild;
+        });
+    }
+
+    function mailFails(message: string) {
+        mockExecFile.mockImplementation((_file: string, _args: string[], _options: unknown, callback: Function) => {
+            callback(new Error(message), '', '');
+            return fakeChild;
+        });
+    }
+
+    function lastScript(): string {
+        const call = mockExecFile.mock.calls.at(-1);
+        expect(call?.[0]).toBe('osascript');
+        expect(call?.[1][0]).toBe('-e');
+        return call?.[1][1] as string;
+    }
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -31,42 +47,34 @@ describe('Mail Actions', () => {
 
     describe('getEmailBody', () => {
         it('should return content when found', async () => {
-            mockExec.mockResolvedValue({ stdout: 'Email Content' });
+            mailReturns('Email Content');
 
             const result = await getEmailBody('12345');
             expect(result).toBe('Email Content');
-            expect(mockExec).toHaveBeenCalledWith(
-                expect.stringContaining('tell application "Mail"')
-            );
+            expect(lastScript()).toContain('tell application "Mail"');
+            expect(lastScript()).toContain('return content of foundMsg');
         });
 
         it('should throw "Message not found" on AppleScript error string', async () => {
-            mockExec.mockResolvedValue({ stdout: '__FRUITMAIL_NOT_FOUND__' });
+            mailReturns('__FRUITMAIL_NOT_FOUND__');
 
             await expect(getEmailBody('12345')).rejects.toThrow('Message not found');
         });
 
         it('should throw strict error if ID is non-numeric', async () => {
-            // paranoid check test
             await expect(getEmailBody('123; rm -rf /')).rejects.toThrow('Invalid message ID');
-            expect(mockExec).not.toHaveBeenCalled();
+            expect(mockExecFile).not.toHaveBeenCalled();
         });
     });
 
     describe('openEmail', () => {
-        it('should call osascript and search all mailboxes by document ID', async () => {
-            mockExec.mockResolvedValue({ stdout: '' });
+        it('should search all mailboxes by document ID', async () => {
+            mailReturns('OK');
 
             await openEmail('msg-uuid-123');
-            expect(mockExec).toHaveBeenCalledWith(
-                expect.stringContaining('repeat with accountRef in every account')
-            );
-            expect(mockExec).toHaveBeenCalledWith(
-                expect.stringContaining('whose message id is candidateId')
-            );
-            expect(mockExec).toHaveBeenCalledWith(
-                expect.stringContaining('open foundMsg')
-            );
+            expect(lastScript()).toContain('repeat with accountRef in every account');
+            expect(lastScript()).toContain('whose message id is candidateId');
+            expect(lastScript()).toContain('open foundMsg');
         });
 
         it('should throw on empty ID', async () => {
@@ -74,26 +82,23 @@ describe('Mail Actions', () => {
         });
 
         it('should throw "Message not found" on not-found marker', async () => {
-            mockExec.mockResolvedValue({ stdout: '__FRUITMAIL_NOT_FOUND__' });
+            mailReturns('__FRUITMAIL_NOT_FOUND__');
             await expect(openEmail('msg-uuid-123')).rejects.toThrow('Message not found');
         });
     });
 
     describe('openEmailByRowId', () => {
-        it('should call osascript with correct ID', async () => {
-            mockExec.mockResolvedValue({ stdout: '' });
+        it('should resolve the row ID directly before any search', async () => {
+            mailReturns('OK');
 
             await openEmailByRowId('12345');
-            expect(mockExec).toHaveBeenCalledWith(
-                expect.stringContaining('repeat with accountRef in every account')
-            );
-            expect(mockExec).toHaveBeenCalledWith(
-                expect.stringContaining('open foundMsg')
-            );
+            expect(lastScript()).toContain('set numericIdCandidates to {12345}');
+            expect(lastScript()).toContain('«class mssg» id candidateId of mailboxRef');
+            expect(lastScript()).toContain('open foundMsg');
         });
 
         it('should throw "Message not found" when AppleScript returns not found marker', async () => {
-            mockExec.mockResolvedValue({ stdout: '__FRUITMAIL_NOT_FOUND__' });
+            mailReturns('__FRUITMAIL_NOT_FOUND__');
             await expect(openEmailByRowId('12345')).rejects.toThrow('Message not found');
         });
 
@@ -102,14 +107,20 @@ describe('Mail Actions', () => {
         });
 
         it('should throw if apple script fails', async () => {
-            mockExec.mockRejectedValue(new Error('Osascript failed'));
+            mailFails('Osascript failed');
             await expect(openEmailByRowId('12345')).rejects.toThrow('Failed to open message via AppleScript');
         });
     });
 
-    describe('lookup fallback', () => {
+    describe('lookup order', () => {
+        it('searches hinted mailboxes before the rest and never only the hinted ones', () => {
+            const script = buildLookupScript({ numericIdCandidates: [123], mailboxHints: ['Inbox'] }, 'inspect');
+            expect(script).toContain('set orderedMailboxRefs to hintedMailboxRefs & otherMailboxRefs');
+            expect(script).toContain('if (id of candidateMsg) is candidateId then');
+        });
+
         it('should search by subject and sender when IDs are unavailable', async () => {
-            mockExec.mockResolvedValue({ stdout: 'OK' });
+            mailReturns('OK');
 
             await openEmailByLookup({
                 messageIdCandidates: [],
@@ -118,19 +129,13 @@ describe('Mail Actions', () => {
                 sender: 'charlene.bloch@yale.edu'
             });
 
-            expect(mockExec).toHaveBeenCalledWith(
-                expect.stringContaining('whose subject is targetSubject and sender contains targetSender')
-            );
-            expect(mockExec).toHaveBeenCalledWith(
-                expect.stringContaining('whose subject contains targetSubject and sender contains targetSender')
-            );
-            expect(mockExec).toHaveBeenCalledWith(
-                expect.stringContaining('whose subject is targetSubject')
-            );
+            expect(lastScript()).toContain('whose subject is targetSubject and sender contains targetSender');
+            expect(lastScript()).toContain('whose subject contains targetSubject and sender contains targetSender');
+            expect(lastScript()).toContain('whose subject is targetSubject');
         });
 
         it('should read body using metadata fallback lookup', async () => {
-            mockExec.mockResolvedValue({ stdout: 'Email body content' });
+            mailReturns('Email body content');
             const result = await getEmailBodyByLookup({
                 messageIdCandidates: [],
                 numericIdCandidates: [],
@@ -138,68 +143,86 @@ describe('Mail Actions', () => {
                 sender: 'sender@example.com'
             });
             expect(result).toBe('Email body content');
-            expect(mockExec).toHaveBeenCalledWith(expect.stringContaining('return content of foundMsg'));
+            expect(lastScript()).toContain('return content of foundMsg');
+        });
+
+        it('exact modes resolve only by row ID', () => {
+            for (const mode of ['inspect', 'readFlag', 'setFlag'] as const) {
+                const script = buildLookupScript({ numericIdCandidates: [123], messageIdCandidates: ['id@example.com'], subject: 'S' }, mode, 'red');
+                expect(script).toContain('«class mssg» id candidateId of mailboxRef');
+                expect(script).not.toContain('whose message id is');
+                expect(script).not.toContain('whose subject');
+                expect(script).not.toContain('whose id is');
+            }
+        });
+
+        it('verifies an expected Message-ID before acting', () => {
+            const script = buildLookupScript({ numericIdCandidates: [123], expectedMessageId: '<id@example.com>' }, 'setFlag', 'red');
+            expect(script).toContain('set expectedMessageId to "id@example.com"');
+            expect(script.indexOf('__FRUITMAIL_IDENTITY_MISMATCH__')).toBeLessThan(script.indexOf('set targetFlagIndex to 0'));
         });
     });
 
     describe('inspection', () => {
         it('returns stable structured message fields', async () => {
-            mockExec.mockResolvedValue({
-                stdout: JSON.stringify({
-                    messageId: 'message@example.com',
-                    subject: 'Subject',
-                    sender: 'sender@example.com',
-                    recipients: ['gustavo@example.com'],
-                    dateReceived: 'Friday, September 18, 2026 at 10:00:00 AM',
-                    mailbox: 'Inbox',
-                    body: 'Body',
-                    headers: 'Message-ID: <message@example.com>',
-                    wasRepliedTo: false,
-                    flagIndex: -1
-                })
-            });
+            mailReturns(JSON.stringify({
+                messageId: 'message@example.com',
+                subject: 'Subject',
+                sender: 'sender@example.com',
+                recipients: ['gustavo@example.com'],
+                mailbox: 'Inbox',
+                body: 'Body',
+                headers: 'Message-ID: <message@example.com>',
+                wasRepliedTo: false,
+                flagIndex: -1
+            }));
 
             await expect(inspectEmailByLookup({ numericIdCandidates: [123] })).resolves.toEqual({
                 messageId: 'message@example.com',
                 subject: 'Subject',
                 sender: 'sender@example.com',
                 recipients: ['gustavo@example.com'],
-                dateReceived: 'Friday, September 18, 2026 at 10:00:00 AM',
                 mailbox: 'Inbox',
                 body: 'Body',
                 headers: 'Message-ID: <message@example.com>',
                 wasRepliedTo: false,
                 flagIndex: -1
             });
-            expect(mockExec).toHaveBeenCalledWith(expect.stringContaining('all headers of foundMsg'));
-            expect(mockExec).toHaveBeenCalledWith(expect.stringContaining('was replied to of foundMsg'));
+            expect(lastScript()).toContain('all headers of foundMsg');
+            expect(lastScript()).toContain('was replied to of foundMsg');
+            expect(lastScript()).not.toContain('date received');
         });
 
         it('reports message-not-found without hiding it', async () => {
-            mockExec.mockResolvedValue({ stdout: '__FRUITMAIL_NOT_FOUND__' });
+            mailReturns('__FRUITMAIL_NOT_FOUND__');
             await expect(inspectEmailByLookup({ numericIdCandidates: [123] })).rejects.toThrow('Message not found');
+        });
+
+        it('reports a malformed response distinctly', async () => {
+            mailReturns('not json');
+            await expect(inspectEmailByLookup({ numericIdCandidates: [123] })).rejects.toThrow('Malformed Mail inspection response');
         });
     });
 
     describe('flag mutation', () => {
         it('reads flag state without message content', async () => {
-            mockExec.mockResolvedValue({ stdout: 'true|4' });
+            mailReturns('true|4');
             await expect(getEmailFlagByLookup({ numericIdCandidates: [123] })).resolves.toEqual({
                 flagged: true,
                 flagIndex: 4
             });
-            expect(mockExec).toHaveBeenCalledWith(expect.stringContaining('return (isFlagged as text)'));
-            expect(mockExec).not.toHaveBeenCalledWith(expect.stringContaining('content of foundMsg'));
+            expect(lastScript()).toContain('return (isFlagged as text)');
+            expect(lastScript()).not.toContain('content of foundMsg');
         });
 
         it.each(Object.entries(MAIL_FLAG_INDEX))('supports %s at Mail flag index %i', async (color, index) => {
-            mockExec.mockResolvedValue({ stdout: `${color}|${index}|true` });
+            mailReturns(`${color}|${index}|true|2`);
 
             await expect(setEmailFlagByLookup(
                 { numericIdCandidates: [123] },
                 color as keyof typeof MAIL_FLAG_INDEX
-            )).resolves.toEqual({ ok: true, color, flagIndex: index, changed: true });
-            expect(mockExec).toHaveBeenCalledWith(expect.stringContaining(`set targetFlagIndex to ${index}`));
+            )).resolves.toEqual({ ok: true, color, flagIndex: index, previousFlagIndex: 2, changed: true });
+            expect(lastScript()).toContain(`set targetFlagIndex to ${index}`);
         });
 
         it('clears a flag without touching other message state', () => {
@@ -210,12 +233,11 @@ describe('Mail Actions', () => {
             expect(script).not.toContain('move foundMsg');
         });
 
-        it('constructs an idempotent same-color check', () => {
-            const script = buildLookupScript({ numericIdCandidates: [123], messageIdCandidates: ['id@example.com'] }, 'setFlag', 'purple');
+        it('constructs an idempotent same-color check that reports the previous index', () => {
+            const script = buildLookupScript({ numericIdCandidates: [123] }, 'setFlag', 'purple');
             expect(script).toContain('currentFlagIndex is not targetFlagIndex');
             expect(script).toContain('set didChange to false');
-            expect(script).toContain('if false and foundMsg is missing value and targetSubject is not "" then');
-            expect(script).not.toContain('set exactIdMatch to false');
+            expect(script).toContain('& "|" & currentFlagIndex');
         });
 
         it('escapes AppleScript lookup strings', () => {
@@ -223,18 +245,39 @@ describe('Mail Actions', () => {
                 numericIdCandidates: [123],
                 messageIdCandidates: ['id"with\\characters'],
                 subject: 'A "quoted" \\ subject',
-                sender: 'sender"@example.com'
-            }, 'inspect');
+                sender: 'sender"@example.com',
+                expectedMessageId: 'expect"ed@example.com'
+            }, 'body');
 
             expect(script).toContain('set targetSubject to "A \\"quoted\\" \\\\ subject"');
             expect(script).toContain('set targetSender to "sender\\"@example.com"');
             expect(script).toContain('{"id\\"with\\\\characters"}');
+            expect(script).toContain('set expectedMessageId to "expect\\"ed@example.com"');
         });
 
         it('reports message-not-found before any mutation result', async () => {
-            mockExec.mockResolvedValue({ stdout: '__FRUITMAIL_NOT_FOUND__' });
+            mailReturns('__FRUITMAIL_NOT_FOUND__');
             await expect(setEmailFlagByLookup({ numericIdCandidates: [123] }, 'red')).rejects.toThrow('Message not found');
+        });
+
+        it('reports an identity mismatch instead of mutating', async () => {
+            mailReturns('__FRUITMAIL_IDENTITY_MISMATCH__');
+            await expect(setEmailFlagByLookup({ numericIdCandidates: [123], expectedMessageId: 'a@example.com' }, 'red'))
+                .rejects.toThrow('Message identity mismatch');
+        });
+
+        it('rejects a malformed flag response', async () => {
+            mailReturns('red|0|true');
+            await expect(setEmailFlagByLookup({ numericIdCandidates: [123] }, 'red')).rejects.toThrow('Malformed Mail flag response');
         });
     });
 
+    it('runs osascript without a shell and with a large output limit', async () => {
+        mailReturns('Email Content');
+        await getEmailBody('1');
+        const [file, args, options] = mockExecFile.mock.calls[0];
+        expect(file).toBe('osascript');
+        expect(args).toHaveLength(2);
+        expect(options.maxBuffer).toBeGreaterThanOrEqual(64 * 1024 * 1024);
+    });
 });

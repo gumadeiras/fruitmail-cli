@@ -42,10 +42,12 @@
   "dependencies": {
     "chalk": "^4.1.2",
     "cli-table3": "^0.6.5",
-    "commander": "^14.0.2"
+    "commander": "^14.0.2",
+    "mailparser": "^3.9.28"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
+    "@types/mailparser": "^3.4.6",
     "@types/node": "^25.0.10",
     "jest": "^30.2.0",
     "ts-jest": "^29.4.6",

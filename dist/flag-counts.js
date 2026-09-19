@@ -17,7 +17,7 @@ async function countMailFlags(db, buildLookup, inboxOnly = false) {
     const activeCondition = deletedColumn ? `m.${(0, db_schema_js_1.quoteIdentifier)(deletedColumn)} = 0` : '1=1';
     const flagCondition = flaggedColumn
         ? `m.${(0, db_schema_js_1.quoteIdentifier)(flaggedColumn)} != 0`
-        : `(m.${(0, db_schema_js_1.quoteIdentifier)(flagsColumn)} & 4) != 0`;
+        : `(m.${(0, db_schema_js_1.quoteIdentifier)(flagsColumn)} & ${db_schema_js_1.MESSAGE_FLAG_FLAGGED}) != 0`;
     const scopeCondition = inboxOnly ? (0, mailbox_scope_js_1.inboxMembershipCondition)(db) : '1=1';
     const totalRow = db.prepare(`SELECT COUNT(*) as count FROM messages m WHERE ${activeCondition} AND ${scopeCondition}`).get();
     const colorSelection = flagColorColumn

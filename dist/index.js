@@ -13,6 +13,7 @@ const node_path_1 = __importDefault(require("node:path"));
 const db_schema_js_1 = require("./db-schema.js");
 const db_finder_js_1 = require("./db-finder.js");
 const flag_counts_js_1 = require("./flag-counts.js");
+const local_message_js_1 = require("./local-message.js");
 const mailbox_scope_js_1 = require("./mailbox-scope.js");
 const mail_actions_js_1 = require("./mail-actions.js");
 const sqlite_js_1 = require("./sqlite.js");
@@ -101,7 +102,7 @@ function buildMessageLookupContext(db, rowId) {
         throw new Error('Invalid message ID');
     }
     const messageColumns = (0, db_schema_js_1.getTableColumns)(db, 'messages');
-    const selectedColumns = ['m.ROWID as _fruitmail_rowid'];
+    const selectedColumns = ['m.ROWID as _fruitmail_rowid', 'm.date_received as _fruitmail_date_received'];
     const selectedAliases = [];
     const joins = [
         'LEFT JOIN subjects s ON m.subject = s.ROWID',
@@ -186,7 +187,8 @@ function buildMessageLookupContext(db, rowId) {
         messageIdCandidates: Array.from(messageIdCandidates),
         mailboxHints: Array.from(mailboxHints),
         subject: asNonEmptyString(row._fruitmail_subject),
-        sender: asNonEmptyString(row._fruitmail_sender)
+        sender: asNonEmptyString(row._fruitmail_sender),
+        dateReceived: (0, db_schema_js_1.unixSecondsToIso)(row._fruitmail_date_received)
     };
 }
 // Database Connection Helper
@@ -217,7 +219,7 @@ async function getDb(options) {
         fileMustExist: true,
         timeout: 2000 // Busy timeout handled natively
     });
-    return { db, cleanUp };
+    return { db, dbPath, cleanUp };
 }
 function sanitizeCell(value) {
     return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -603,7 +605,7 @@ program.command('inspect <id>')
                 subject: inspected.subject,
                 sender: inspected.sender,
                 recipients: inspected.recipients,
-                dateReceived: inspected.dateReceived,
+                dateReceived: lookup.dateReceived,
                 mailbox: friendlyMailboxName(inspected.mailbox),
                 body: inspected.body,
                 headers: inspected.headers,
@@ -622,8 +624,30 @@ program.command('inspect <id>')
         handleCommandError(error, opts);
     }
 });
+program.command('read <ids...>')
+    .description('Read messages from the local Mail store without Mail.app')
+    .action(async (ids, options, command) => {
+    const opts = getCommandOptions(options, command);
+    try {
+        const numericIds = ids.map(parseMessageId);
+        const { db, dbPath, cleanUp } = await getDb(opts);
+        try {
+            const results = await (0, local_message_js_1.readLocalMessages)(db, dbPath, numericIds);
+            console.log(JSON.stringify(results.map((result) => ('error' in result ? result : { ...result, mailbox: friendlyMailboxName(result.mailbox) })), null, 2));
+        }
+        finally {
+            db.close();
+            if (cleanUp)
+                cleanUp();
+        }
+    }
+    catch (error) {
+        handleCommandError(error, opts);
+    }
+});
 program.command('set-flag <id> <color>')
     .description('Set or clear one message flag in Mail.app')
+    .option('--expect-message-id <messageId>', 'Fail unless the found message carries this Message-ID')
     .action(async (id, color, options, command) => {
     const opts = getCommandOptions(options, command);
     try {
@@ -634,7 +658,7 @@ program.command('set-flag <id> <color>')
             const lookup = buildMessageLookupContext(db, String(numericId));
             if (!lookup)
                 throw new Error('Message not found');
-            const flagResult = await (0, mail_actions_js_1.setEmailFlagByLookup)(lookup, parsedColor);
+            const flagResult = await (0, mail_actions_js_1.setEmailFlagByLookup)({ ...lookup, expectedMessageId: options.expectMessageId }, parsedColor);
             const result = { id: numericId, ...flagResult };
             if (opts.json) {
                 console.log(JSON.stringify(result, null, 2));

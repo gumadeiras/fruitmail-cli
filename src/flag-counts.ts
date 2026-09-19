@@ -1,4 +1,4 @@
-import { findColumnByAlias, getTableColumns, quoteIdentifier } from './db-schema.js';
+import { findColumnByAlias, getTableColumns, MESSAGE_FLAG_FLAGGED, quoteIdentifier } from './db-schema.js';
 import { getEmailFlagByLookup, MailFlagColor, MailLookupContext } from './mail-actions.js';
 import { inboxMembershipCondition } from './mailbox-scope.js';
 
@@ -26,7 +26,7 @@ export async function countMailFlags(
     const activeCondition = deletedColumn ? `m.${quoteIdentifier(deletedColumn)} = 0` : '1=1';
     const flagCondition = flaggedColumn
         ? `m.${quoteIdentifier(flaggedColumn)} != 0`
-        : `(m.${quoteIdentifier(flagsColumn as string)} & 4) != 0`;
+        : `(m.${quoteIdentifier(flagsColumn as string)} & ${MESSAGE_FLAG_FLAGGED}) != 0`;
     const scopeCondition = inboxOnly ? inboxMembershipCondition(db) : '1=1';
     const totalRow = db.prepare(`SELECT COUNT(*) as count FROM messages m WHERE ${activeCondition} AND ${scopeCondition}`).get() as { count: number };
     const colorSelection = flagColorColumn

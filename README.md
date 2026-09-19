@@ -14,9 +14,10 @@ Requires Node.js 22.13 or newer for npm installs.
 - **⚡ Fast:** Direct read-only SQLite access (zero-copy default)
 - **🔒 Safe:** Uses read-only mode by default, or copies DB with `--copy` flag
 - **📧 Body content:** Read full email bodies via AppleScript (fast for a few emails)
+- **📂 Local reads:** Read many messages straight from Mail's on-disk store, without Mail.app
 - **🔍 Full search:** Search by subject, sender, recipient, date range, attachments, and more
 - **🎯 Exact inspection:** Read stable message metadata, reply state, headers, body, and flag state as JSON
-- **🚩 Explicit flags:** Set or clear one Mail flag color without changing read, junk, or mailbox state
+- **🚩 Explicit flags:** Set or clear one Mail flag color without changing read, junk, or mailbox state, optionally only when the message still carries an expected Message-ID
 
 ## 📦 Installation
  
@@ -60,9 +61,13 @@ Requires Node.js 22.13 or newer for npm installs.
  # Inspect one exact message as stable JSON
  fruitmail inspect 94695 --json
 
+ # Read many messages from the local store, without Mail.app
+ fruitmail read 94695 94696 --json
+
  # Set or clear only that message's colored flag
  fruitmail set-flag 94695 purple --json
  fruitmail set-flag 94695 none --json
+ fruitmail set-flag 94695 purple --expect-message-id id@example.com --json
 
  # Count colored flags without returning message content
  fruitmail flag-counts --json
@@ -73,15 +78,30 @@ Requires Node.js 22.13 or newer for npm installs.
 
 `inspect <id> --json` returns these stable keys: `id`, `messageId`,
 `subject`, `sender`, `recipients`, `dateReceived`, `mailbox`, `body`,
-`headers`, `wasRepliedTo`, and `flagIndex`. Missing Mail properties use an
-empty string, empty array, `false`, or `-1` as appropriate.
+`headers`, `wasRepliedTo`, and `flagIndex`. `dateReceived` is ISO 8601 from
+Mail's index. Missing Mail properties use an empty string, empty array,
+`false`, or `-1` as appropriate. The message is resolved by its row ID inside
+Mail.app; a message that Mail no longer has under that ID is reported as
+`Message not found`.
+
+`read <id...> --json` returns one entry per requested ID with the same keys as
+`inspect`, in request order, without Mail.app. It locates each message's
+`.emlx` file from the index, parses the MIME content, and takes `wasRepliedTo`
+and `flagIndex` from the index. An entry that cannot be read is
+`{ "id": <id>, "error": "..." }`: `Message not found` when the index has no
+live row, `No local message file` when Mail has not stored the message
+locally. `body` is the text part, or text converted from HTML when the
+message has no text part, so it can differ from Mail's own rendering.
 
 `set-flag <id> <color> --json` accepts `red`, `orange`, `yellow`, `green`,
 `blue`, `purple`, `gray`, or `none`. It returns `ok`, `id`, `color`,
-`flagIndex`, and `changed`. `none` clears the flag. Repeating an operation is
-safe and returns `changed: false` when Mail already has the requested state.
-Flag changes use Mail.app's AppleScript interface. They never move, copy,
-archive, delete, mark read, or mark junk.
+`flagIndex`, `previousFlagIndex`, and `changed`. `none` clears the flag.
+Repeating an operation is safe and returns `changed: false` when Mail already
+has the requested state. With `--expect-message-id <id>`, the flag changes
+only if the message Mail resolves for that row ID still carries that
+Message-ID; otherwise the command fails with `Message identity mismatch` and
+changes nothing. Flag changes use Mail.app's AppleScript interface. They never
+move, copy, archive, delete, mark read, or mark junk.
 
 `flag-counts --json` reads Mail's indexed flagged bit, then asks Mail.app only
 for the color of each flagged message. It returns total and flagged message
@@ -98,7 +118,8 @@ message identity or content.
 ## 🏗️ Technical Details
 
 - **Database:** `~/Library/Mail/V{9,10,11}/MailData/Envelope Index`
-- **Query method:** SQLite (read-only) + AppleScript (body content)
+- **Query method:** SQLite (read-only) + `.emlx` files (`read`) + AppleScript (`body`, `inspect`, `set-flag`)
+- **Message files:** `~/Library/Mail/V*/<account>/<mailbox>.mbox/<store>/Data/<digits>/Messages/<row id>.emlx`
 - **Safety:** Read-only mode prevents modification; optional `--copy` mode available
 
 ## 🛠️ Scripts

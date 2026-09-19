@@ -6,9 +6,10 @@ import Table from 'cli-table3';
 import { copyFileSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { findColumnByAlias, getTableColumns, quoteIdentifier } from './db-schema.js';
+import { findColumnByAlias, getTableColumns, quoteIdentifier, unixSecondsToIso } from './db-schema.js';
 import { findDbPath } from './db-finder.js';
 import { countMailFlags, formatFlagCounts } from './flag-counts.js';
+import { readLocalMessages } from './local-message.js';
 import { inboxMembershipCondition } from './mailbox-scope.js';
 import {
     getEmailBodyByLookup,
@@ -78,6 +79,7 @@ interface MessageLookupContext {
     mailboxHints?: string[];
     subject?: string;
     sender?: string;
+    dateReceived: string;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -138,7 +140,7 @@ function buildMessageLookupContext(db: any, rowId: string): MessageLookupContext
     }
 
     const messageColumns = getTableColumns(db, 'messages');
-    const selectedColumns: string[] = ['m.ROWID as _fruitmail_rowid'];
+    const selectedColumns: string[] = ['m.ROWID as _fruitmail_rowid', 'm.date_received as _fruitmail_date_received'];
     const selectedAliases: Array<{ column: string; alias: string }> = [];
     const joins: string[] = [
         'LEFT JOIN subjects s ON m.subject = s.ROWID',
@@ -226,7 +228,8 @@ function buildMessageLookupContext(db: any, rowId: string): MessageLookupContext
         messageIdCandidates: Array.from(messageIdCandidates),
         mailboxHints: Array.from(mailboxHints),
         subject: asNonEmptyString(row._fruitmail_subject),
-        sender: asNonEmptyString(row._fruitmail_sender)
+        sender: asNonEmptyString(row._fruitmail_sender),
+        dateReceived: unixSecondsToIso(row._fruitmail_date_received)
     };
 }
 
@@ -261,7 +264,7 @@ async function getDb(options: QueryOptions) {
         timeout: 2000 // Busy timeout handled natively
     });
 
-    return { db, cleanUp };
+    return { db, dbPath, cleanUp };
 }
 
 function sanitizeCell(value: unknown): string {
@@ -656,7 +659,7 @@ program.command('inspect <id>')
                     subject: inspected.subject,
                     sender: inspected.sender,
                     recipients: inspected.recipients,
-                    dateReceived: inspected.dateReceived,
+                    dateReceived: lookup.dateReceived,
                     mailbox: friendlyMailboxName(inspected.mailbox),
                     body: inspected.body,
                     headers: inspected.headers,
@@ -673,8 +676,30 @@ program.command('inspect <id>')
         }
     });
 
+program.command('read <ids...>')
+    .description('Read messages from the local Mail store without Mail.app')
+    .action(async (ids: string[], options, command) => {
+        const opts = getCommandOptions(options, command);
+        try {
+            const numericIds = ids.map(parseMessageId);
+            const { db, dbPath, cleanUp } = await getDb(opts);
+            try {
+                const results = await readLocalMessages(db, dbPath, numericIds);
+                console.log(JSON.stringify(results.map((result) => (
+                    'error' in result ? result : { ...result, mailbox: friendlyMailboxName(result.mailbox) }
+                )), null, 2));
+            } finally {
+                db.close();
+                if (cleanUp) cleanUp();
+            }
+        } catch (error) {
+            handleCommandError(error, opts);
+        }
+    });
+
 program.command('set-flag <id> <color>')
     .description('Set or clear one message flag in Mail.app')
+    .option('--expect-message-id <messageId>', 'Fail unless the found message carries this Message-ID')
     .action(async (id, color, options, command) => {
         const opts = getCommandOptions(options, command);
         try {
@@ -684,7 +709,7 @@ program.command('set-flag <id> <color>')
             try {
                 const lookup = buildMessageLookupContext(db, String(numericId));
                 if (!lookup) throw new Error('Message not found');
-                const flagResult = await setEmailFlagByLookup(lookup, parsedColor);
+                const flagResult = await setEmailFlagByLookup({ ...lookup, expectedMessageId: options.expectMessageId }, parsedColor);
                 const result = { id: numericId, ...flagResult };
                 if (opts.json) {
                     console.log(JSON.stringify(result, null, 2));

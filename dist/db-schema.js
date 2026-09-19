@@ -1,8 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.MESSAGE_FLAG_FLAGGED = exports.MESSAGE_FLAG_ANSWERED = void 0;
 exports.quoteIdentifier = quoteIdentifier;
 exports.getTableColumns = getTableColumns;
 exports.findColumnByAlias = findColumnByAlias;
+exports.unixSecondsToIso = unixSecondsToIso;
 function quoteIdentifier(identifier) {
     return `"${identifier.replace(/"/g, '""')}"`;
 }
@@ -23,4 +25,14 @@ function findColumnByAlias(columns, aliases) {
             return match;
     }
     return undefined;
+}
+/** Envelope Index `messages.flags` bits that Mail keeps in sync with IMAP and Exchange state. */
+exports.MESSAGE_FLAG_ANSWERED = 1 << 2;
+exports.MESSAGE_FLAG_FLAGGED = 1 << 4;
+/** Envelope Index dates are Unix seconds; return ISO 8601 or an empty string for missing values. */
+function unixSecondsToIso(value) {
+    const seconds = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(seconds) || seconds <= 0)
+        return '';
+    return new Date(Math.round(seconds * 1000)).toISOString();
 }
