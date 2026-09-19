@@ -3,6 +3,19 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SQLiteDatabase = void 0;
 const node_fs_1 = require("node:fs");
 const node_sqlite_1 = require("node:sqlite");
+function normalizeInteger(value) {
+    if (typeof value !== 'bigint')
+        return value;
+    if (value >= BigInt(Number.MIN_SAFE_INTEGER) && value <= BigInt(Number.MAX_SAFE_INTEGER)) {
+        return Number(value);
+    }
+    return value.toString();
+}
+function normalizeRow(row) {
+    if (!row)
+        return undefined;
+    return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, normalizeInteger(value)]));
+}
 function normalizeParams(params) {
     if (params === undefined)
         return [];
@@ -12,12 +25,13 @@ class SQLiteStatement {
     statement;
     constructor(statement) {
         this.statement = statement;
+        this.statement.setReadBigInts(true);
     }
     all(params) {
-        return this.statement.all(...normalizeParams(params));
+        return this.statement.all(...normalizeParams(params)).map((row) => normalizeRow(row));
     }
     get(params) {
-        return this.statement.get(...normalizeParams(params));
+        return normalizeRow(this.statement.get(...normalizeParams(params)));
     }
 }
 class SQLiteDatabase {

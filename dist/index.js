@@ -10,7 +10,10 @@ const cli_table3_1 = __importDefault(require("cli-table3"));
 const node_fs_1 = require("node:fs");
 const node_os_1 = __importDefault(require("node:os"));
 const node_path_1 = __importDefault(require("node:path"));
+const db_schema_js_1 = require("./db-schema.js");
 const db_finder_js_1 = require("./db-finder.js");
+const flag_counts_js_1 = require("./flag-counts.js");
+const mailbox_scope_js_1 = require("./mailbox-scope.js");
 const mail_actions_js_1 = require("./mail-actions.js");
 const sqlite_js_1 = require("./sqlite.js");
 // Setup CLI
@@ -63,27 +66,6 @@ function handleCommandError(error, options) {
 function getCommandOptions(options, command) {
     return (command?.optsWithGlobals ? command.optsWithGlobals() : options);
 }
-function quoteIdentifier(identifier) {
-    return `"${identifier.replace(/"/g, '""')}"`;
-}
-function getTableColumns(db, tableName) {
-    try {
-        const rows = db.prepare(`PRAGMA table_info(${quoteIdentifier(tableName)})`).all();
-        return rows.map((row) => row.name);
-    }
-    catch {
-        return [];
-    }
-}
-function findColumnByAlias(columns, aliases) {
-    const columnByLower = new Map(columns.map((column) => [column.toLowerCase(), column]));
-    for (const alias of aliases) {
-        const match = columnByLower.get(alias.toLowerCase());
-        if (match)
-            return match;
-    }
-    return undefined;
-}
 function asNonEmptyString(value) {
     if (typeof value !== 'string')
         return undefined;
@@ -92,54 +74,72 @@ function asNonEmptyString(value) {
 }
 function asPositiveInteger(value) {
     const candidate = typeof value === 'number' ? value : Number(value);
-    if (!Number.isInteger(candidate) || candidate <= 0)
+    if (!Number.isSafeInteger(candidate) || candidate <= 0)
         return undefined;
     return candidate;
+}
+function parseMessageId(value) {
+    const text = String(value);
+    if (!/^\d+$/.test(text)) {
+        throw new Error('Invalid message ID');
+    }
+    const id = Number(text);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+        throw new Error('Invalid message ID');
+    }
+    return id;
+}
+function parseFlagColor(value) {
+    const color = String(value).toLowerCase();
+    if (!Object.prototype.hasOwnProperty.call(mail_actions_js_1.MAIL_FLAG_INDEX, color)) {
+        throw new Error(`Invalid flag color: expected ${Object.keys(mail_actions_js_1.MAIL_FLAG_INDEX).join(', ')}`);
+    }
+    return color;
 }
 function buildMessageLookupContext(db, rowId) {
     if (!/^\d+$/.test(rowId)) {
         throw new Error('Invalid message ID');
     }
-    const messageColumns = getTableColumns(db, 'messages');
+    const messageColumns = (0, db_schema_js_1.getTableColumns)(db, 'messages');
     const selectedColumns = ['m.ROWID as _fruitmail_rowid'];
     const selectedAliases = [];
     const joins = [
         'LEFT JOIN subjects s ON m.subject = s.ROWID',
         'LEFT JOIN addresses a ON m.sender = a.ROWID'
     ];
-    const textIdColumns = ['document_id', 'message_id', 'internet_message_id', 'remote_id', 'external_id'];
+    const textIdColumns = ['document_id', 'internet_message_id', 'external_id'];
     for (const column of textIdColumns) {
         if (messageColumns.includes(column)) {
             const alias = `_fruitmail_${column}`;
-            selectedColumns.push(`m.${quoteIdentifier(column)} as ${quoteIdentifier(alias)}`);
+            selectedColumns.push(`m.${(0, db_schema_js_1.quoteIdentifier)(column)} as ${(0, db_schema_js_1.quoteIdentifier)(alias)}`);
             selectedAliases.push({ column, alias });
         }
     }
-    const numericIdColumns = ['id', 'message_id', 'mail_id', 'mailbox_message_id', 'remote_id'];
+    const numericIdColumns = ['id', 'message_id', 'mail_id', 'mailbox_message_id'];
     for (const column of numericIdColumns) {
         if (!messageColumns.includes(column))
             continue;
         if (selectedAliases.some((entry) => entry.column === column))
             continue;
         const alias = `_fruitmail_${column}`;
-        selectedColumns.push(`m.${quoteIdentifier(column)} as ${quoteIdentifier(alias)}`);
+        selectedColumns.push(`m.${(0, db_schema_js_1.quoteIdentifier)(column)} as ${(0, db_schema_js_1.quoteIdentifier)(alias)}`);
         selectedAliases.push({ column, alias });
     }
     const mailboxHintsAliases = [];
-    const mailboxColumnInMessages = findColumnByAlias(messageColumns, ['mailbox']);
-    const mailboxTableColumns = getTableColumns(db, 'mailboxes');
+    const mailboxColumnInMessages = (0, db_schema_js_1.findColumnByAlias)(messageColumns, ['mailbox']);
+    const mailboxTableColumns = (0, db_schema_js_1.getTableColumns)(db, 'mailboxes');
     if (mailboxColumnInMessages) {
         const mailboxAlias = '_fruitmail_mailbox_raw';
-        selectedColumns.push(`m.${quoteIdentifier(mailboxColumnInMessages)} as ${quoteIdentifier(mailboxAlias)}`);
+        selectedColumns.push(`m.${(0, db_schema_js_1.quoteIdentifier)(mailboxColumnInMessages)} as ${(0, db_schema_js_1.quoteIdentifier)(mailboxAlias)}`);
         mailboxHintsAliases.push(mailboxAlias);
         if (mailboxTableColumns.length > 0) {
-            joins.push(`LEFT JOIN mailboxes mb ON m.${quoteIdentifier(mailboxColumnInMessages)} = mb.ROWID`);
+            joins.push(`LEFT JOIN mailboxes mb ON m.${(0, db_schema_js_1.quoteIdentifier)(mailboxColumnInMessages)} = mb.ROWID`);
             const mailboxHintColumns = ['display_name', 'name', 'path', 'url'];
             for (const column of mailboxHintColumns) {
                 if (!mailboxTableColumns.includes(column))
                     continue;
                 const alias = `_fruitmail_mailbox_${column}`;
-                selectedColumns.push(`mb.${quoteIdentifier(column)} as ${quoteIdentifier(alias)}`);
+                selectedColumns.push(`mb.${(0, db_schema_js_1.quoteIdentifier)(column)} as ${(0, db_schema_js_1.quoteIdentifier)(alias)}`);
                 mailboxHintsAliases.push(alias);
             }
         }
@@ -169,7 +169,7 @@ function buildMessageLookupContext(db, rowId) {
     }
     const messageIdCandidates = new Set();
     for (const { column, alias } of selectedAliases) {
-        if (!['document_id', 'message_id', 'internet_message_id', 'remote_id', 'external_id'].includes(column))
+        if (!['document_id', 'internet_message_id', 'external_id'].includes(column))
             continue;
         const textValue = asNonEmptyString(row[alias]);
         if (textValue)
@@ -344,19 +344,19 @@ async function runSearch(filters, options) {
             'LEFT JOIN addresses a ON m.sender = a.rowid'
         ];
         let mailboxSelect = '';
-        const messageColumns = getTableColumns(db, 'messages');
-        const mailboxColumnInMessages = findColumnByAlias(messageColumns, ['mailbox']);
-        const mailboxColumns = getTableColumns(db, 'mailboxes');
+        const messageColumns = (0, db_schema_js_1.getTableColumns)(db, 'messages');
+        const mailboxColumnInMessages = (0, db_schema_js_1.findColumnByAlias)(messageColumns, ['mailbox']);
+        const mailboxColumns = (0, db_schema_js_1.getTableColumns)(db, 'mailboxes');
         if (mailboxColumnInMessages) {
-            const quotedMailboxColumn = quoteIdentifier(mailboxColumnInMessages);
+            const quotedMailboxColumn = (0, db_schema_js_1.quoteIdentifier)(mailboxColumnInMessages);
             const mailboxLabelColumn = mailboxColumns.length > 0
-                ? findColumnByAlias(mailboxColumns, ['display_name', 'name', 'path', 'url'])
+                ? (0, db_schema_js_1.findColumnByAlias)(mailboxColumns, ['display_name', 'name', 'path', 'url'])
                 : undefined;
             if (mailboxColumns.length > 0) {
                 joins.push(`LEFT JOIN mailboxes mb ON m.${quotedMailboxColumn} = mb.ROWID`);
             }
             mailboxSelect = mailboxLabelColumn
-                ? `,\n        COALESCE(mb.${quoteIdentifier(mailboxLabelColumn)}, CAST(m.${quotedMailboxColumn} AS TEXT)) as mailbox`
+                ? `,\n        COALESCE(mb.${(0, db_schema_js_1.quoteIdentifier)(mailboxLabelColumn)}, CAST(m.${quotedMailboxColumn} AS TEXT)) as mailbox`
                 : `,\n        CAST(m.${quotedMailboxColumn} AS TEXT) as mailbox`;
         }
         // --subject
@@ -386,6 +386,8 @@ async function runSearch(filters, options) {
             conditions.push('m.read = 0');
         if (filters.read)
             conditions.push('m.read = 1');
+        if (filters.inbox)
+            conditions.push((0, mailbox_scope_js_1.inboxMembershipCondition)(db));
         // --days
         if (filters.days) {
             const seconds = Math.floor(Date.now() / 1000) - (parseInt(filters.days) * 86400);
@@ -440,6 +442,7 @@ program.command('search')
     .option('--to <text>', 'Search by recipient')
     .option('--unread', 'Only unread emails')
     .option('--read', 'Only read emails')
+    .option('--inbox', 'Only messages in account inboxes')
     .option('--days <number>', 'Days lookback', '7')
     .option('--has-attachment', 'Only emails with attachments')
     .option('--attachment-type <ext>', 'Filter by attachment extension (e.g. pdf)')
@@ -571,6 +574,99 @@ program.command('body <id>')
             else {
                 console.log(content);
             }
+        }
+        finally {
+            db.close();
+            if (cleanUp)
+                cleanUp();
+        }
+    }
+    catch (error) {
+        handleCommandError(error, opts);
+    }
+});
+program.command('inspect <id>')
+    .description('Inspect one exact message through Mail.app')
+    .action(async (id, options, command) => {
+    const opts = getCommandOptions(options, command);
+    try {
+        const numericId = parseMessageId(id);
+        const { db, cleanUp } = await getDb(opts);
+        try {
+            const lookup = buildMessageLookupContext(db, String(numericId));
+            if (!lookup)
+                throw new Error('Message not found');
+            const inspected = await (0, mail_actions_js_1.inspectEmailByLookup)(lookup);
+            const result = {
+                id: numericId,
+                messageId: inspected.messageId,
+                subject: inspected.subject,
+                sender: inspected.sender,
+                recipients: inspected.recipients,
+                dateReceived: inspected.dateReceived,
+                mailbox: friendlyMailboxName(inspected.mailbox),
+                body: inspected.body,
+                headers: inspected.headers,
+                wasRepliedTo: inspected.wasRepliedTo,
+                flagIndex: inspected.flagIndex
+            };
+            console.log(JSON.stringify(result, null, 2));
+        }
+        finally {
+            db.close();
+            if (cleanUp)
+                cleanUp();
+        }
+    }
+    catch (error) {
+        handleCommandError(error, opts);
+    }
+});
+program.command('set-flag <id> <color>')
+    .description('Set or clear one message flag in Mail.app')
+    .action(async (id, color, options, command) => {
+    const opts = getCommandOptions(options, command);
+    try {
+        const numericId = parseMessageId(id);
+        const parsedColor = parseFlagColor(color);
+        const { db, cleanUp } = await getDb(opts);
+        try {
+            const lookup = buildMessageLookupContext(db, String(numericId));
+            if (!lookup)
+                throw new Error('Message not found');
+            const flagResult = await (0, mail_actions_js_1.setEmailFlagByLookup)(lookup, parsedColor);
+            const result = { id: numericId, ...flagResult };
+            if (opts.json) {
+                console.log(JSON.stringify(result, null, 2));
+            }
+            else {
+                const action = flagResult.changed ? 'Updated' : 'Already set';
+                console.log(`${action}: message ${numericId} flag is ${parsedColor}`);
+            }
+        }
+        finally {
+            db.close();
+            if (cleanUp)
+                cleanUp();
+        }
+    }
+    catch (error) {
+        handleCommandError(error, opts);
+    }
+});
+program.command('flag-counts')
+    .description('Count colored message flags without returning message content')
+    .option('--inbox', 'Only messages in account inboxes')
+    .action(async (localOptions, command) => {
+    const opts = getCommandOptions(localOptions, command);
+    try {
+        const { db, cleanUp } = await getDb(opts);
+        try {
+            const result = await (0, flag_counts_js_1.countMailFlags)(db, buildMessageLookupContext, localOptions.inbox === true);
+            if (opts.json)
+                console.log(JSON.stringify(result, null, 2));
+            else
+                console.log((0, flag_counts_js_1.formatFlagCounts)(result));
         }
         finally {
             db.close();

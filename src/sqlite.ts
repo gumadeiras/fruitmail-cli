@@ -10,20 +10,35 @@ interface SQLiteOptions {
 type SQLiteParam = string | number | bigint | null | Buffer;
 type SQLiteRow = Record<string, unknown>;
 
+function normalizeInteger(value: unknown): unknown {
+    if (typeof value !== 'bigint') return value;
+    if (value >= BigInt(Number.MIN_SAFE_INTEGER) && value <= BigInt(Number.MAX_SAFE_INTEGER)) {
+        return Number(value);
+    }
+    return value.toString();
+}
+
+function normalizeRow(row: SQLiteRow | undefined): SQLiteRow | undefined {
+    if (!row) return undefined;
+    return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, normalizeInteger(value)]));
+}
+
 function normalizeParams(params?: SQLiteParam[] | SQLiteParam): SQLiteParam[] {
     if (params === undefined) return [];
     return Array.isArray(params) ? params : [params];
 }
 
 class SQLiteStatement {
-    constructor(private readonly statement: StatementSync) { }
+    constructor(private readonly statement: StatementSync) {
+        this.statement.setReadBigInts(true);
+    }
 
     all(params?: SQLiteParam[] | SQLiteParam): SQLiteRow[] {
-        return this.statement.all(...normalizeParams(params)) as SQLiteRow[];
+        return (this.statement.all(...normalizeParams(params)) as SQLiteRow[]).map((row) => normalizeRow(row) as SQLiteRow);
     }
 
     get(params?: SQLiteParam[] | SQLiteParam): SQLiteRow | undefined {
-        return this.statement.get(...normalizeParams(params)) as SQLiteRow | undefined;
+        return normalizeRow(this.statement.get(...normalizeParams(params)) as SQLiteRow | undefined);
     }
 }
 

@@ -4,6 +4,9 @@
 
 ### Features
 
+- Added `inspect <id> --json` for exact, stable message metadata, body, headers, reply state, and flag state.
+- Added `set-flag <id> <color> --json` to set or clear one Mail flag through AppleScript with idempotent results and no other message changes.
+- Added `flag-counts --json` for a content-free mailbox-wide count of existing colored flags.
 - Added `--offset` / `-o` to paginate search results based on PR #1. Thanks to @JakubPecenka.
 
 ### Fixes

@@ -15,6 +15,8 @@ Requires Node.js 22.13 or newer for npm installs.
 - **🔒 Safe:** Uses read-only mode by default, or copies DB with `--copy` flag
 - **📧 Body content:** Read full email bodies via AppleScript (fast for a few emails)
 - **🔍 Full search:** Search by subject, sender, recipient, date range, attachments, and more
+- **🎯 Exact inspection:** Read stable message metadata, reply state, headers, body, and flag state as JSON
+- **🚩 Explicit flags:** Set or clear one Mail flag color without changing read, junk, or mailbox state
 
 ## 📦 Installation
  
@@ -54,10 +56,37 @@ Requires Node.js 22.13 or newer for npm installs.
  
  # Open in Mail.app
  fruitmail open 94695
+
+ # Inspect one exact message as stable JSON
+ fruitmail inspect 94695 --json
+
+ # Set or clear only that message's colored flag
+ fruitmail set-flag 94695 purple --json
+ fruitmail set-flag 94695 none --json
+
+ # Count colored flags without returning message content
+ fruitmail flag-counts --json
  
  # Database stats
  fruitmail stats
  ```
+
+`inspect <id> --json` returns these stable keys: `id`, `messageId`,
+`subject`, `sender`, `recipients`, `dateReceived`, `mailbox`, `body`,
+`headers`, `wasRepliedTo`, and `flagIndex`. Missing Mail properties use an
+empty string, empty array, `false`, or `-1` as appropriate.
+
+`set-flag <id> <color> --json` accepts `red`, `orange`, `yellow`, `green`,
+`blue`, `purple`, `gray`, or `none`. It returns `ok`, `id`, `color`,
+`flagIndex`, and `changed`. `none` clears the flag. Repeating an operation is
+safe and returns `changed: false` when Mail already has the requested state.
+Flag changes use Mail.app's AppleScript interface. They never move, copy,
+archive, delete, mark read, or mark junk.
+
+`flag-counts --json` reads Mail's indexed flagged bit, then asks Mail.app only
+for the color of each flagged message. It returns total and flagged message
+counts, counts for all seven colors, and an `unresolved` count. It never returns
+message identity or content.
 
 ## 📊 Performance
 

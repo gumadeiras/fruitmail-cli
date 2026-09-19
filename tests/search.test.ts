@@ -17,6 +17,9 @@ function setupFakeDb(filePath: string) {
       sender INTEGER,
       read INTEGER DEFAULT 1,
       deleted INTEGER DEFAULT 0,
+      flags INTEGER DEFAULT 0,
+      flag_color INTEGER,
+      remote_id INTEGER,
       document_id TEXT,
       mailbox INTEGER
     );
@@ -41,6 +44,10 @@ function setupFakeDb(filePath: string) {
         ROWID INTEGER PRIMARY KEY,
         display_name TEXT
     );
+    CREATE TABLE labels (
+        message_id INTEGER,
+        mailbox_id INTEGER
+    );
   `);
 
     // Insert Data
@@ -52,7 +59,7 @@ function setupFakeDb(filePath: string) {
     db.prepare("INSERT INTO addresses (ROWID, address, comment) VALUES (3, 'billing@example.com', 'Billing')").run();
     db.prepare("INSERT INTO mailboxes (ROWID, display_name) VALUES (10, 'Inbox')").run();
     db.prepare("INSERT INTO mailboxes (ROWID, display_name) VALUES (11, 'deleted messages')").run();
-    db.prepare('INSERT INTO messages (ROWID, date_sent, subject, sender, read, deleted, mailbox) VALUES (100, ?, 1, 1, 0, 0, 10)').run(now);
+    db.prepare('INSERT INTO messages (ROWID, date_sent, subject, sender, read, deleted, flags, flag_color, remote_id, mailbox) VALUES (100, ?, 1, 1, 0, 0, 4, 1, 8559239795323845908, 10)').run(now);
     db.prepare('INSERT INTO recipients (message, address) VALUES (100, 3)').run();
 
     // 2. "Hello Mom" (Read, Old, Attachment)
@@ -69,6 +76,7 @@ function setupFakeDb(filePath: string) {
     // 4. Long subject for width-formatting test
     db.prepare("INSERT INTO subjects (ROWID, subject) VALUES (4, 'Very long subject that should be truncated to fit in terminal width without breaking the table layout or wrapping lines unexpectedly')").run();
     db.prepare('INSERT INTO messages (ROWID, date_sent, subject, sender, read, deleted, mailbox) VALUES (103, ?, 4, 1, 1, 0, 11)').run(now);
+    db.prepare('INSERT INTO labels (message_id, mailbox_id) VALUES (103, 10)').run();
 
     db.close();
 }
@@ -91,12 +99,28 @@ if [[ "$payload" != *"-e"* ]]; then
   payload="$(cat)"
 fi
 case "$payload" in
+  *"return (isFlagged as text)"*) printf 'true|0' ;;
+  *"makeInspectionJson"*) printf '%s' '{"messageId":"invoice@example.com","subject":"Your Invoice from Amazon","sender":"no-reply@amazon.com","recipients":["billing@example.com"],"dateReceived":"Friday, September 18, 2026 at 10:00:00 AM","mailbox":"Inbox","body":"Mock Body","headers":"Message-ID: <invoice@example.com>","wasRepliedTo":false,"flagIndex":-1}' ;;
+  *"set targetFlagIndex to 0"*) printf 'red|0|true' ;;
+  *"set targetFlagIndex to 1"*) printf 'orange|1|true' ;;
+  *"set targetFlagIndex to 2"*) printf 'yellow|2|true' ;;
+  *"set targetFlagIndex to 3"*) printf 'green|3|true' ;;
+  *"set targetFlagIndex to 4"*) printf 'blue|4|true' ;;
+  *"set targetFlagIndex to 5"*) printf 'purple|5|true' ;;
+  *"set targetFlagIndex to 6"*) printf 'gray|6|true' ;;
+  *"set targetFlagIndex to -1"*) printf 'none|-1|false' ;;
   *"return content of foundMsg"*|*"return content of msg"*) printf 'Mock Body' ;;
   *"open foundMsg"*|*"open msg"*) printf 'OK' ;;
   *) printf '__FRUITMAIL_NOT_FOUND__' ;;
 esac
 `);
         fs.chmodSync(osascriptPath, 0o755);
+
+        const openPath = path.join(tempBinDir, 'open');
+        fs.writeFileSync(openPath, `#!/usr/bin/env bash
+exit 0
+`);
+        fs.chmodSync(openPath, 0o755);
     });
 
     afterAll(() => {
@@ -182,6 +206,11 @@ esac
         expect(json[0].mailbox).toBe('Inbox');
     });
 
+    it('scopes All Inboxes across primary mailboxes and label membership', async () => {
+        const json = await parseJson('search --inbox --days 3650 --json');
+        expect(json.map((row: any) => row.id).sort()).toEqual([100, 103]);
+    });
+
     it.each([
         ['subject shortcut', 'subject invoice --json', ['Your Invoice from Amazon']],
         ['sender shortcut', 'sender mom --json', ['Hello Mom']],
@@ -204,6 +233,56 @@ esac
         await expect(runCli('body 100 --json')).resolves.toBe(JSON.stringify({ id: '100', body: 'Mock Body' }, null, 2));
         await expect(runCli('open 100')).resolves.toBe('');
         await expect(parseJson('--copy search --subject invoice --days 3650 --json')).resolves.toHaveLength(1);
+    });
+
+    it('inspects one exact message with stable JSON fields', async () => {
+        await expect(parseJson('inspect 100 --json')).resolves.toEqual({
+            id: 100,
+            messageId: 'invoice@example.com',
+            subject: 'Your Invoice from Amazon',
+            sender: 'no-reply@amazon.com',
+            recipients: ['billing@example.com'],
+            dateReceived: 'Friday, September 18, 2026 at 10:00:00 AM',
+            mailbox: 'Inbox',
+            body: 'Mock Body',
+            headers: 'Message-ID: <invoice@example.com>',
+            wasRepliedTo: false,
+            flagIndex: -1
+        });
+    });
+
+    it.each([
+        ['red', 0], ['orange', 1], ['yellow', 2], ['green', 3],
+        ['blue', 4], ['purple', 5], ['gray', 6], ['none', -1]
+    ])('sets the %s flag with JSON output', async (color, flagIndex) => {
+        const result = await parseJson(`set-flag 100 ${color} --json`);
+        expect(result).toEqual({ id: 100, ok: true, color, flagIndex, changed: color !== 'none' });
+    });
+
+    it('rejects invalid inspect and set-flag inputs as JSON', async () => {
+        await expect(runCliJsonFailure('inspect not-a-number --json')).resolves.toEqual({ error: 'Invalid message ID' });
+        await expect(runCliJsonFailure('set-flag 100 chartreuse --json')).resolves.toEqual({
+            error: 'Invalid flag color: expected red, orange, yellow, green, blue, purple, gray, none'
+        });
+        await expect(runCliJsonFailure('set-flag 999 red --json')).resolves.toEqual({ error: 'Message not found' });
+    });
+
+    it('counts all colored flags without exposing message content', async () => {
+        await expect(parseJson('flag-counts --json')).resolves.toEqual({
+            totalMessages: 3,
+            flaggedMessages: 1,
+            colors: { red: 1, orange: 0, yellow: 0, green: 0, blue: 0, purple: 0, gray: 0 },
+            unresolved: 0
+        });
+    });
+
+    it('scopes flag counts to All Inboxes', async () => {
+        await expect(parseJson('flag-counts --inbox --json')).resolves.toEqual({
+            totalMessages: 2,
+            flaggedMessages: 1,
+            colors: { red: 1, orange: 0, yellow: 0, green: 0, blue: 0, purple: 0, gray: 0 },
+            unresolved: 0
+        });
     });
 
     it('should run raw queries in the Bash CLI', async () => {
