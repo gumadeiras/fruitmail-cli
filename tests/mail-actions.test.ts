@@ -2,7 +2,6 @@ import {
     buildLookupScript,
     getEmailBody,
     getEmailBodyByLookup,
-    getEmailFlagByLookup,
     inspectEmailByLookup,
     MAIL_FLAG_INDEX,
     openEmail,
@@ -147,7 +146,7 @@ describe('Mail Actions', () => {
         });
 
         it('exact modes resolve only by row ID', () => {
-            for (const mode of ['inspect', 'readFlag', 'setFlag'] as const) {
+            for (const mode of ['inspect', 'setFlag'] as const) {
                 const script = buildLookupScript({ numericIdCandidates: [123], messageIdCandidates: ['id@example.com'], subject: 'S' }, mode, 'red');
                 expect(script).toContain('«class mssg» id candidateId of mailboxRef');
                 expect(script).not.toContain('whose message id is');
@@ -205,16 +204,6 @@ describe('Mail Actions', () => {
     });
 
     describe('flag mutation', () => {
-        it('reads flag state without message content', async () => {
-            mailReturns('true|4');
-            await expect(getEmailFlagByLookup({ numericIdCandidates: [123] })).resolves.toEqual({
-                flagged: true,
-                flagIndex: 4
-            });
-            expect(lastScript()).toContain('return (isFlagged as text)');
-            expect(lastScript()).not.toContain('content of foundMsg');
-        });
-
         it.each(Object.entries(MAIL_FLAG_INDEX))('supports %s at Mail flag index %i', async (color, index) => {
             mailReturns(`${color}|${index}|true|2`);
 

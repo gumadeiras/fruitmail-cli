@@ -7,7 +7,7 @@
 - Added `inspect <id> --json` for exact, stable message metadata, body, headers, reply state, and flag state. `dateReceived` is ISO 8601 from Mail's index.
 - Added `read <id...> --json` to read many messages from Mail's on-disk store without Mail.app, with the same keys as `inspect`.
 - Added `set-flag <id> <color> --json` to set or clear one Mail flag through AppleScript with idempotent results, the previous flag index, and no other message changes. `--expect-message-id` refuses the change when the message no longer carries that Message-ID.
-- Added `flag-counts --json` for a content-free mailbox-wide count of existing colored flags.
+- Added `flag-counts --json` for a content-free mailbox-wide count of existing colored flags, read from the index without Mail.app.
 - Added `--offset` / `-o` to paginate search results based on PR #1. Thanks to @JakubPecenka.
 
 ### Changes

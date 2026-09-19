@@ -38,11 +38,6 @@ export interface SetMailFlagResult {
   changed: boolean;
 }
 
-export interface MailFlagState {
-  flagged: boolean;
-  flagIndex: number;
-}
-
 export interface MailLookupContext {
   numericIdCandidates?: number[];
   messageIdCandidates?: string[];
@@ -53,7 +48,7 @@ export interface MailLookupContext {
   expectedMessageId?: string;
 }
 
-type LookupMode = 'open' | 'body' | 'inspect' | 'readFlag' | 'setFlag';
+type LookupMode = 'open' | 'body' | 'inspect' | 'setFlag';
 
 function escapeAppleScriptString(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -167,18 +162,6 @@ function setFlagResultScript(color: MailFlagColor): string {
         return "${color}|${flagIndex}|" & (didChange as text) & "|" & currentFlagIndex`;
 }
 
-function readFlagResultScript(): string {
-  return `
-        set isFlagged to flagged status of foundMsg
-        set currentFlagIndex to -1
-        if isFlagged then
-          try
-            set currentFlagIndex to flag index of foundMsg as integer
-          end try
-        end if
-        return (isFlagged as text) & "|" & currentFlagIndex`;
-}
-
 /**
  * Search fallbacks for `open` and `body`, which accept document IDs and
  * subject text. Exact modes never use them: a message that the row ID does not
@@ -237,7 +220,7 @@ function searchFallbackScript(): string {
 
 export function buildLookupScript(context: MailLookupContext, mode: LookupMode, color?: MailFlagColor): string {
   const normalized = normalizeLookupContext(context);
-  const exactOnly = mode === 'inspect' || mode === 'readFlag' || mode === 'setFlag';
+  const exactOnly = mode === 'inspect' || mode === 'setFlag';
 
   if (mode === 'setFlag' && !color) {
     throw new Error('Flag color is required');
@@ -249,9 +232,7 @@ export function buildLookupScript(context: MailLookupContext, mode: LookupMode, 
       ? 'open foundMsg\n        activate\n        return "OK"'
       : mode === 'inspect'
         ? inspectResultScript()
-        : mode === 'readFlag'
-          ? readFlagResultScript()
-          : setFlagResultScript(color as MailFlagColor);
+        : setFlagResultScript(color as MailFlagColor);
 
   const inspectionSupport = mode === 'inspect' ? `
     use framework "Foundation"
@@ -479,21 +460,6 @@ export async function setEmailFlagByLookup(
       changed: returnedChanged === 'true'
     };
   }, 'Failed to set message flag via AppleScript', color);
-}
-
-export async function getEmailFlagByLookup(context: MailLookupContext): Promise<MailFlagState> {
-  return runLookup(context, 'readFlag', (output) => {
-    const [flaggedText, indexText] = output.split('|');
-    if ((flaggedText !== 'true' && flaggedText !== 'false') || !/^-?\d+$/.test(indexText ?? '')) {
-      throw new Error('Malformed Mail flag response');
-    }
-    const flagged = flaggedText === 'true';
-    const flagIndex = Number(indexText);
-    if ((flagged && (flagIndex < 0 || flagIndex > 6)) || (!flagged && flagIndex !== -1)) {
-      throw new Error('Malformed Mail flag response');
-    }
-    return { flagged, flagIndex };
-  }, 'Failed to read message flag via AppleScript');
 }
 
 // Backwards-compatible wrappers

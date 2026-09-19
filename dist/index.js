@@ -686,7 +686,7 @@ program.command('flag-counts')
     try {
         const { db, cleanUp } = await getDb(opts);
         try {
-            const result = await (0, flag_counts_js_1.countMailFlags)(db, buildMessageLookupContext, localOptions.inbox === true);
+            const result = (0, flag_counts_js_1.countMailFlags)(db, localOptions.inbox === true);
             if (opts.json)
                 console.log(JSON.stringify(result, null, 2));
             else

@@ -102,11 +102,7 @@ async function readLocalMessages(db, dbPath, ids) {
         throw new Error('Mail database does not expose mailbox locations');
     const messageColumns = (0, db_schema_js_1.getTableColumns)(db, 'messages');
     const flaggedColumn = (0, db_schema_js_1.findColumnByAlias)(messageColumns, ['flagged']);
-    const flagColorColumn = (0, db_schema_js_1.findColumnByAlias)(messageColumns, ['flag_color']);
-    const stateColumns = [
-        flaggedColumn ? `, m.${(0, db_schema_js_1.quoteIdentifier)(flaggedColumn)} as flagged` : '',
-        flagColorColumn ? `, m.${(0, db_schema_js_1.quoteIdentifier)(flagColorColumn)} as flagColor` : ''
-    ].join('');
+    const stateColumns = flaggedColumn ? `, m.${(0, db_schema_js_1.quoteIdentifier)(flaggedColumn)} as flagged` : '';
     const store = new LocalMessageStore(node_path_1.default.dirname(node_path_1.default.dirname(dbPath)));
     const rows = new Map();
     if (ids.length > 0) {
@@ -135,15 +131,13 @@ async function readLocalMessages(db, dbPath, ids) {
         }
         try {
             const content = await parseMessageContent(readEmlxMessage(filePath));
-            const flagged = Number(row.flagged ?? 0) !== 0;
-            const color = Number(row.flagColor);
             results.push({
                 id,
                 ...content,
                 dateReceived: (0, db_schema_js_1.unixSecondsToIso)(row.date_received),
                 mailbox: row.url,
                 wasRepliedTo: (Number(row.flags) & db_schema_js_1.MESSAGE_FLAG_ANSWERED) !== 0,
-                flagIndex: flagged && Number.isInteger(color) && color >= 1 && color <= 7 ? color - 1 : -1
+                flagIndex: (0, db_schema_js_1.messageFlagIndex)(row.flags, row.flagged)
             });
         }
         catch {

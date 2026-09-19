@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { simpleParser, type AddressObject } from 'mailparser';
-import { findColumnByAlias, getTableColumns, MESSAGE_FLAG_ANSWERED, quoteIdentifier, unixSecondsToIso } from './db-schema.js';
+import { findColumnByAlias, getTableColumns, MESSAGE_FLAG_ANSWERED, messageFlagIndex, quoteIdentifier, unixSecondsToIso } from './db-schema.js';
 
 /**
  * Reads messages from Mail's on-disk store without Mail.app.
@@ -11,7 +11,7 @@ import { findColumnByAlias, getTableColumns, MESSAGE_FLAG_ANSWERED, quoteIdentif
  * where `<digits>` are the row ID without its last three digits, least
  * significant first, and `.partial.emlx` marks a copy with attachments removed.
  * The row ID is the Envelope Index `messages.ROWID`, so the index alone locates
- * the file; mutable state comes from the index and content from the file.
+ * the file; replied and flag state come from the index and content from the file.
  */
 
 export interface LocalMessage {
@@ -120,7 +120,6 @@ interface IndexedRow {
     date_received: number | null;
     url: string | null;
     flagged?: number | null;
-    flagColor?: number | null;
 }
 
 export async function readLocalMessages(db: any, dbPath: string, ids: number[]): Promise<LocalMessageResult[]> {
@@ -129,11 +128,7 @@ export async function readLocalMessages(db: any, dbPath: string, ids: number[]):
     if (!urlColumn) throw new Error('Mail database does not expose mailbox locations');
     const messageColumns = getTableColumns(db, 'messages');
     const flaggedColumn = findColumnByAlias(messageColumns, ['flagged']);
-    const flagColorColumn = findColumnByAlias(messageColumns, ['flag_color']);
-    const stateColumns = [
-        flaggedColumn ? `, m.${quoteIdentifier(flaggedColumn)} as flagged` : '',
-        flagColorColumn ? `, m.${quoteIdentifier(flagColorColumn)} as flagColor` : ''
-    ].join('');
+    const stateColumns = flaggedColumn ? `, m.${quoteIdentifier(flaggedColumn)} as flagged` : '';
 
     const store = new LocalMessageStore(path.dirname(path.dirname(dbPath)));
     const rows = new Map<number, IndexedRow>();
@@ -163,15 +158,13 @@ export async function readLocalMessages(db: any, dbPath: string, ids: number[]):
         }
         try {
             const content = await parseMessageContent(readEmlxMessage(filePath));
-            const flagged = Number(row.flagged ?? 0) !== 0;
-            const color = Number(row.flagColor);
             results.push({
                 id,
                 ...content,
                 dateReceived: unixSecondsToIso(row.date_received),
                 mailbox: row.url,
                 wasRepliedTo: (Number(row.flags) & MESSAGE_FLAG_ANSWERED) !== 0,
-                flagIndex: flagged && Number.isInteger(color) && color >= 1 && color <= 7 ? color - 1 : -1
+                flagIndex: messageFlagIndex(row.flags, row.flagged)
             });
         } catch {
             results.push({ id, error: 'Unreadable local message file' });

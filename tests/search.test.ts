@@ -113,7 +113,7 @@ function setupFakeDb(filePath: string) {
     db.prepare("INSERT INTO addresses (ROWID, address, comment) VALUES (3, 'billing@example.com', 'Billing')").run();
     db.prepare("INSERT INTO mailboxes (ROWID, display_name, url) VALUES (10, 'Inbox', ?)").run(`ews://${ACCOUNT_UUID}/Inbox`);
     db.prepare("INSERT INTO mailboxes (ROWID, display_name, url) VALUES (11, 'deleted messages', ?)").run(`ews://${ACCOUNT_UUID}/Deleted%20Messages`);
-    db.prepare('INSERT INTO messages (ROWID, date_sent, date_received, subject, sender, read, deleted, flags, flag_color, remote_id, mailbox) VALUES (100, ?, ?, 1, 1, 0, 0, 20, 1, 8559239795323845908, 10)').run(now, RECEIVED_SECONDS);
+    db.prepare('INSERT INTO messages (ROWID, date_sent, date_received, subject, sender, read, deleted, flags, flag_color, remote_id, mailbox) VALUES (100, ?, ?, 1, 1, 0, 0, 1099511627796, 1, 8559239795323845908, 10)').run(now, RECEIVED_SECONDS);
     db.prepare('INSERT INTO recipients (message, address) VALUES (100, 3)').run();
 
     // 2. "Hello Mom" (Read, Old, Attachment)
@@ -136,7 +136,7 @@ function setupFakeDb(filePath: string) {
     const ancient = now - (4000 * 86400);
     db.prepare("INSERT INTO subjects (ROWID, subject) VALUES (5, 'Local subject')").run();
     db.prepare('INSERT INTO messages (ROWID, date_sent, date_received, subject, sender, read, deleted, flags, mailbox) VALUES (157897, ?, ?, 5, 1, 1, 0, 5, 10)').run(ancient, RECEIVED_SECONDS);
-    db.prepare('INSERT INTO messages (ROWID, date_sent, date_received, subject, sender, read, deleted, flags, mailbox) VALUES (157898, ?, ?, 5, 1, 1, 0, 1, 10)').run(ancient, RECEIVED_SECONDS);
+    db.prepare('INSERT INTO messages (ROWID, date_sent, date_received, subject, sender, read, deleted, flags, mailbox) VALUES (157898, ?, ?, 5, 1, 1, 0, 3298534883345, 10)').run(ancient, RECEIVED_SECONDS);
 
     db.close();
 }
@@ -162,7 +162,6 @@ if [[ "$payload" != *"-e"* ]]; then
 fi
 case "$payload" in
   *'set expectedMessageId to "wrong@example.com"'*) printf '__FRUITMAIL_IDENTITY_MISMATCH__' ;;
-  *"return (isFlagged as text)"*) printf 'true|0' ;;
   *"makeInspectionJson"*) printf '%s' '{"messageId":"invoice@example.com","subject":"Your Invoice from Amazon","sender":"no-reply@amazon.com","recipients":["billing@example.com"],"mailbox":"Inbox","body":"Mock Body","headers":"Message-ID: <invoice@example.com>","wasRepliedTo":false,"flagIndex":-1}' ;;
   *"set targetFlagIndex to 0"*) printf 'red|0|true|-1' ;;
   *"set targetFlagIndex to 1"*) printf 'orange|1|true|-1' ;;
@@ -351,7 +350,8 @@ exit 0
             messageId: 'html-only@example.com',
             subject: 'HTML only',
             body: 'First paragraph.\n\nSecond link [https://tracker.example/x].',
-            wasRepliedTo: false
+            wasRepliedTo: false,
+            flagIndex: 6
         });
         expect(results[2]).toEqual({ id: 100, error: 'No local message file' });
         expect(results[3]).toEqual({ id: 102, error: 'Message not found' });
@@ -370,11 +370,11 @@ exit 0
         await expect(runCliJsonFailure('set-flag 999 red --json')).resolves.toEqual({ error: 'Message not found' });
     });
 
-    it('counts all colored flags without exposing message content', async () => {
+    it('counts colored flags from the index color bits without Mail.app', async () => {
         await expect(parseJson('flag-counts --json')).resolves.toEqual({
             totalMessages: 5,
-            flaggedMessages: 1,
-            colors: { red: 1, orange: 0, yellow: 0, green: 0, blue: 0, purple: 0, gray: 0 },
+            flaggedMessages: 2,
+            colors: { red: 0, orange: 0, yellow: 1, green: 0, blue: 0, purple: 0, gray: 1 },
             unresolved: 0
         });
     });
@@ -382,8 +382,8 @@ exit 0
     it('scopes flag counts to All Inboxes', async () => {
         await expect(parseJson('flag-counts --inbox --json')).resolves.toEqual({
             totalMessages: 4,
-            flaggedMessages: 1,
-            colors: { red: 1, orange: 0, yellow: 0, green: 0, blue: 0, purple: 0, gray: 0 },
+            flaggedMessages: 2,
+            colors: { red: 0, orange: 0, yellow: 1, green: 0, blue: 0, purple: 0, gray: 1 },
             unresolved: 0
         });
     });

@@ -103,10 +103,15 @@ Message-ID; otherwise the command fails with `Message identity mismatch` and
 changes nothing. Flag changes use Mail.app's AppleScript interface. They never
 move, copy, archive, delete, mark read, or mark junk.
 
-`flag-counts --json` reads Mail's indexed flagged bit, then asks Mail.app only
-for the color of each flagged message. It returns total and flagged message
-counts, counts for all seven colors, and an `unresolved` count. It never returns
-message identity or content.
+`flag-counts --json` reads the flagged state and flag color from Mail's index
+without Mail.app. It returns total and flagged message counts, counts for all
+seven colors, and an `unresolved` count of flagged messages whose color bits
+fall outside the seven colors. It never returns message identity or content.
+
+Mail keeps the flag color in bits 39 to 41 of the index's `flags` value,
+numbered like the AppleScript flag index: 0 red, 1 orange, 2 yellow, 3 green,
+4 blue, 5 purple, 6 gray. `read` and `flag-counts` use those bits; the
+`flag_color` column is 1 for every flagged message and carries no color.
 
 ## 📊 Performance
 
