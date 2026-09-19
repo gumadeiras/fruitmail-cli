@@ -156,7 +156,8 @@ async function readLocalMessages(db, dbPath, ids, maxBodyChars = Infinity) {
         throw new Error('Mail database does not expose mailbox locations');
     const messageColumns = (0, db_schema_js_1.getTableColumns)(db, 'messages');
     const flaggedColumn = (0, db_schema_js_1.findColumnByAlias)(messageColumns, ['flagged']);
-    const stateColumns = flaggedColumn ? `, m.${(0, db_schema_js_1.quoteIdentifier)(flaggedColumn)} as flagged` : '';
+    const stateColumns = (flaggedColumn ? `, m.${(0, db_schema_js_1.quoteIdentifier)(flaggedColumn)} as flagged` : '')
+        + (messageColumns.includes('message_id') ? ', m.message_id as index_message_id' : '');
     const store = new LocalMessageStore(node_path_1.default.dirname(node_path_1.default.dirname(dbPath)));
     const rows = new Map();
     if (ids.length > 0) {
@@ -191,7 +192,8 @@ async function readLocalMessages(db, dbPath, ids, maxBodyChars = Infinity) {
                 dateReceived: (0, db_schema_js_1.unixSecondsToIso)(row.date_received),
                 mailbox: row.url,
                 wasRepliedTo: (Number(row.flags) & db_schema_js_1.MESSAGE_FLAG_ANSWERED) !== 0,
-                flagIndex: (0, db_schema_js_1.messageFlagIndex)(row.flags, row.flagged)
+                flagIndex: (0, db_schema_js_1.messageFlagIndex)(row.flags, row.flagged),
+                indexMessageId: (0, db_schema_js_1.indexMessageIdOf)(row.index_message_id)
             });
         }
         catch {

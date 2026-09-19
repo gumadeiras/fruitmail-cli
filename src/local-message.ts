@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { type AddressObject, type AttachmentStream, type Headers, MailParser, type MessageText } from 'mailparser';
-import { findColumnByAlias, getTableColumns, MESSAGE_FLAG_ANSWERED, messageFlagIndex, quoteIdentifier, unixSecondsToIso } from './db-schema.js';
+import { findColumnByAlias, getTableColumns, indexMessageIdOf, MESSAGE_FLAG_ANSWERED, messageFlagIndex, quoteIdentifier, unixSecondsToIso } from './db-schema.js';
 
 /**
  * Reads messages from Mail's on-disk store without Mail.app.
@@ -27,6 +27,8 @@ export interface LocalMessage {
     headers: string;
     wasRepliedTo: boolean;
     flagIndex: number;
+    /** The index's own integer message identifier for this row, as a string; null when the index has none. */
+    indexMessageId: string | null;
 }
 
 export type LocalMessageResult = LocalMessage | { id: number; error: string };
@@ -176,6 +178,7 @@ interface IndexedRow {
     date_received: number | null;
     url: string | null;
     flagged?: number | null;
+    index_message_id?: unknown;
 }
 
 export async function readLocalMessages(db: any, dbPath: string, ids: number[], maxBodyChars = Infinity): Promise<LocalMessageResult[]> {
@@ -184,7 +187,8 @@ export async function readLocalMessages(db: any, dbPath: string, ids: number[], 
     if (!urlColumn) throw new Error('Mail database does not expose mailbox locations');
     const messageColumns = getTableColumns(db, 'messages');
     const flaggedColumn = findColumnByAlias(messageColumns, ['flagged']);
-    const stateColumns = flaggedColumn ? `, m.${quoteIdentifier(flaggedColumn)} as flagged` : '';
+    const stateColumns = (flaggedColumn ? `, m.${quoteIdentifier(flaggedColumn)} as flagged` : '')
+        + (messageColumns.includes('message_id') ? ', m.message_id as index_message_id' : '');
 
     const store = new LocalMessageStore(path.dirname(path.dirname(dbPath)));
     const rows = new Map<number, IndexedRow>();
@@ -220,7 +224,8 @@ export async function readLocalMessages(db: any, dbPath: string, ids: number[], 
                 dateReceived: unixSecondsToIso(row.date_received),
                 mailbox: row.url,
                 wasRepliedTo: (Number(row.flags) & MESSAGE_FLAG_ANSWERED) !== 0,
-                flagIndex: messageFlagIndex(row.flags, row.flagged)
+                flagIndex: messageFlagIndex(row.flags, row.flagged),
+                indexMessageId: indexMessageIdOf(row.index_message_id)
             });
         } catch {
             results.push({ id, error: 'Unreadable local message file' });

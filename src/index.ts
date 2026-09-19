@@ -6,10 +6,11 @@ import Table from 'cli-table3';
 import { copyFileSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { findColumnByAlias, getTableColumns, quoteIdentifier, unixSecondsToIso } from './db-schema.js';
+import { findColumnByAlias, getTableColumns, indexMessageIdOf, quoteIdentifier, unixSecondsToIso } from './db-schema.js';
 import { findDbPath } from './db-finder.js';
 import { countMailFlags, formatFlagCounts } from './flag-counts.js';
 import { readLocalMessages } from './local-message.js';
+import { readMessageStatuses } from './message-status.js';
 import { inboxMembershipCondition } from './mailbox-scope.js';
 import {
     getEmailBodyByLookup,
@@ -76,6 +77,7 @@ function parsePaginationOptions(options: QueryOptions): PaginationOptions {
 interface MessageLookupContext {
     numericIdCandidates: number[];
     messageIdCandidates: string[];
+    indexMessageId: string | null;
     mailboxHints?: string[];
     subject?: string;
     sender?: string;
@@ -229,6 +231,8 @@ function buildMessageLookupContext(db: any, rowId: string): MessageLookupContext
         if (textValue) messageIdCandidates.add(textValue.replace(/^<|>$/g, ''));
     }
 
+    const indexMessageIdAlias = selectedAliases.find(({ column }) => column === 'message_id')?.alias;
+
     const mailboxHints = new Set<string>();
     for (const alias of mailboxHintsAliases) {
         const hint = asNonEmptyString(row[alias]);
@@ -238,6 +242,7 @@ function buildMessageLookupContext(db: any, rowId: string): MessageLookupContext
     return {
         numericIdCandidates: Array.from(numericIdCandidates),
         messageIdCandidates: Array.from(messageIdCandidates),
+        indexMessageId: indexMessageIdOf(indexMessageIdAlias ? row[indexMessageIdAlias] : null),
         mailboxHints: Array.from(mailboxHints),
         subject: asNonEmptyString(row._fruitmail_subject),
         sender: asNonEmptyString(row._fruitmail_sender),
@@ -667,6 +672,7 @@ program.command('inspect <id>')
                 const inspected = await inspectEmailByLookup(lookup);
                 const result = {
                     id: numericId,
+                    indexMessageId: lookup.indexMessageId,
                     messageId: inspected.messageId,
                     subject: inspected.subject,
                     sender: inspected.sender,
@@ -737,6 +743,33 @@ program.command('set-flag <id> <color>')
                 } else {
                     const action = flagResult.changed ? 'Updated' : 'Already set';
                     console.log(`${action}: message ${numericId} flag is ${parsedColor}`);
+                }
+            } finally {
+                db.close();
+                if (cleanUp) cleanUp();
+            }
+        } catch (error) {
+            handleCommandError(error, opts);
+        }
+    });
+
+program.command('status <ids...>')
+    .description('Read flag, reply, and inbox state for messages from the index, without content or Mail.app')
+    .action(async (ids: string[], options, command) => {
+        const opts = getCommandOptions(options, command);
+        try {
+            const numericIds = ids.map(parseMessageId);
+            const { db, cleanUp } = await getDb(opts);
+            try {
+                const results = readMessageStatuses(db, numericIds);
+                if (opts.json) {
+                    console.log(JSON.stringify(results, null, 2));
+                } else {
+                    for (const result of results) {
+                        console.log('error' in result
+                            ? `${result.id}: ${result.error}`
+                            : `${result.id}: flag ${result.flagIndex}, replied ${result.wasRepliedTo}, inbox ${result.inInbox}`);
+                    }
                 }
             } finally {
                 db.close();

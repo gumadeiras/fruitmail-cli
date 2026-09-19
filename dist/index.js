@@ -14,6 +14,7 @@ const db_schema_js_1 = require("./db-schema.js");
 const db_finder_js_1 = require("./db-finder.js");
 const flag_counts_js_1 = require("./flag-counts.js");
 const local_message_js_1 = require("./local-message.js");
+const message_status_js_1 = require("./message-status.js");
 const mailbox_scope_js_1 = require("./mailbox-scope.js");
 const mail_actions_js_1 = require("./mail-actions.js");
 const sqlite_js_1 = require("./sqlite.js");
@@ -189,6 +190,7 @@ function buildMessageLookupContext(db, rowId) {
         if (textValue)
             messageIdCandidates.add(textValue.replace(/^<|>$/g, ''));
     }
+    const indexMessageIdAlias = selectedAliases.find(({ column }) => column === 'message_id')?.alias;
     const mailboxHints = new Set();
     for (const alias of mailboxHintsAliases) {
         const hint = asNonEmptyString(row[alias]);
@@ -198,6 +200,7 @@ function buildMessageLookupContext(db, rowId) {
     return {
         numericIdCandidates: Array.from(numericIdCandidates),
         messageIdCandidates: Array.from(messageIdCandidates),
+        indexMessageId: (0, db_schema_js_1.indexMessageIdOf)(indexMessageIdAlias ? row[indexMessageIdAlias] : null),
         mailboxHints: Array.from(mailboxHints),
         subject: asNonEmptyString(row._fruitmail_subject),
         sender: asNonEmptyString(row._fruitmail_sender),
@@ -614,6 +617,7 @@ program.command('inspect <id>')
             const inspected = await (0, mail_actions_js_1.inspectEmailByLookup)(lookup);
             const result = {
                 id: numericId,
+                indexMessageId: lookup.indexMessageId,
                 messageId: inspected.messageId,
                 subject: inspected.subject,
                 sender: inspected.sender,
@@ -685,6 +689,36 @@ program.command('set-flag <id> <color>')
             else {
                 const action = flagResult.changed ? 'Updated' : 'Already set';
                 console.log(`${action}: message ${numericId} flag is ${parsedColor}`);
+            }
+        }
+        finally {
+            db.close();
+            if (cleanUp)
+                cleanUp();
+        }
+    }
+    catch (error) {
+        handleCommandError(error, opts);
+    }
+});
+program.command('status <ids...>')
+    .description('Read flag, reply, and inbox state for messages from the index, without content or Mail.app')
+    .action(async (ids, options, command) => {
+    const opts = getCommandOptions(options, command);
+    try {
+        const numericIds = ids.map(parseMessageId);
+        const { db, cleanUp } = await getDb(opts);
+        try {
+            const results = (0, message_status_js_1.readMessageStatuses)(db, numericIds);
+            if (opts.json) {
+                console.log(JSON.stringify(results, null, 2));
+            }
+            else {
+                for (const result of results) {
+                    console.log('error' in result
+                        ? `${result.id}: ${result.error}`
+                        : `${result.id}: flag ${result.flagIndex}, replied ${result.wasRepliedTo}, inbox ${result.inInbox}`);
+                }
             }
         }
         finally {

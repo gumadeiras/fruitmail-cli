@@ -20,6 +20,11 @@ export function findColumnByAlias(columns: string[], aliases: string[]): string 
     return undefined;
 }
 
+/** Preserve an Envelope Index integer identifier exactly across SQLite and JSON. */
+export function indexMessageIdOf(value: unknown): string | null {
+    return value === null || value === undefined ? null : String(value);
+}
+
 /** Envelope Index `messages.flags` bits that Mail keeps in sync with IMAP and Exchange state. */
 export const MESSAGE_FLAG_ANSWERED = 1 << 2;
 export const MESSAGE_FLAG_FLAGGED = 1 << 4;

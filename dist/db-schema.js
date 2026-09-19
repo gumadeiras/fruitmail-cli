@@ -4,6 +4,7 @@ exports.MESSAGE_FLAG_FLAGGED = exports.MESSAGE_FLAG_ANSWERED = void 0;
 exports.quoteIdentifier = quoteIdentifier;
 exports.getTableColumns = getTableColumns;
 exports.findColumnByAlias = findColumnByAlias;
+exports.indexMessageIdOf = indexMessageIdOf;
 exports.messageIsFlagged = messageIsFlagged;
 exports.messageFlagIndex = messageFlagIndex;
 exports.unixSecondsToIso = unixSecondsToIso;
@@ -27,6 +28,10 @@ function findColumnByAlias(columns, aliases) {
             return match;
     }
     return undefined;
+}
+/** Preserve an Envelope Index integer identifier exactly across SQLite and JSON. */
+function indexMessageIdOf(value) {
+    return value === null || value === undefined ? null : String(value);
 }
 /** Envelope Index `messages.flags` bits that Mail keeps in sync with IMAP and Exchange state. */
 exports.MESSAGE_FLAG_ANSWERED = 1 << 2;

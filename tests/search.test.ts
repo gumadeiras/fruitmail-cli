@@ -74,6 +74,7 @@ function setupFakeDb(filePath: string) {
       flag_color INTEGER,
       remote_id INTEGER,
       document_id TEXT,
+      message_id INTEGER,
       mailbox INTEGER
     );
     CREATE TABLE subjects (
@@ -115,6 +116,7 @@ function setupFakeDb(filePath: string) {
     db.prepare("INSERT INTO mailboxes (ROWID, display_name, url) VALUES (11, 'deleted messages', ?)").run(`ews://${ACCOUNT_UUID}/Deleted%20Messages`);
     db.prepare('INSERT INTO messages (ROWID, date_sent, date_received, subject, sender, read, deleted, flags, flag_color, remote_id, mailbox) VALUES (100, ?, ?, 1, 1, 0, 0, 1099511627796, 1, 8559239795323845908, 10)').run(now, RECEIVED_SECONDS);
     db.prepare('INSERT INTO recipients (message, address) VALUES (100, 3)').run();
+    db.prepare('UPDATE messages SET message_id = -4317561145929622860 WHERE ROWID = 100').run();
 
     // 2. "Hello Mom" (Read, Old, Attachment)
     const old = now - (30 * 86400); // 30 days ago
@@ -136,6 +138,7 @@ function setupFakeDb(filePath: string) {
     const ancient = now - (4000 * 86400);
     db.prepare("INSERT INTO subjects (ROWID, subject) VALUES (5, 'Local subject')").run();
     db.prepare('INSERT INTO messages (ROWID, date_sent, date_received, subject, sender, read, deleted, flags, mailbox) VALUES (157897, ?, ?, 5, 1, 1, 0, 5, 10)').run(ancient, RECEIVED_SECONDS);
+    db.prepare('UPDATE messages SET message_id = -4317561145929622861 WHERE ROWID = 157897').run();
     db.prepare('INSERT INTO messages (ROWID, date_sent, date_received, subject, sender, read, deleted, flags, mailbox) VALUES (157898, ?, ?, 5, 1, 1, 0, 3298534883345, 10)').run(ancient, RECEIVED_SECONDS);
 
     db.close();
@@ -300,6 +303,7 @@ exit 0
     it('inspects one exact message with stable JSON fields', async () => {
         await expect(parseJson('inspect 100 --json')).resolves.toEqual({
             id: 100,
+            indexMessageId: '-4317561145929622860',
             messageId: 'invoice@example.com',
             subject: 'Your Invoice from Amazon',
             sender: 'no-reply@amazon.com',
@@ -333,6 +337,7 @@ exit 0
         expect(results).toHaveLength(5);
         expect(results[0]).toEqual({
             id: 157897,
+            indexMessageId: '-4317561145929622861',
             messageId: 'request@example.com',
             subject: 'Revisão urgente',
             sender: '"Person, Some" <person@example.com>',
@@ -476,5 +481,27 @@ exit 0
         expect(out).toMatch(/Total messages:\s+6/);
         expect(out).toMatch(/Deleted:\s+1/);
         expect(out).toMatch(/Unread:\s+1/);
+    });
+
+    it('status reports flag, reply, inbox state, and the index message id without message content', async () => {
+        const json = await parseJson('status 103 100 101 102 999 --json');
+        expect(json).toEqual([
+            { id: 103, flagIndex: -1, wasRepliedTo: false, inInbox: true, indexMessageId: null },
+            { id: 100, flagIndex: 2, wasRepliedTo: true, inInbox: true, indexMessageId: '-4317561145929622860' },
+            { id: 101, flagIndex: -1, wasRepliedTo: false, inInbox: false, indexMessageId: null },
+            { id: 102, error: 'Message not found' },
+            { id: 999, error: 'Message not found' }
+        ]);
+        expect(JSON.stringify(json)).not.toContain('Invoice');
+        expect(await runCli('status 100')).toBe('100: flag 2, replied true, inbox true');
+    });
+
+    it('read reports the same index message id as status', async () => {
+        const [read] = await parseJson('read 157897 --json');
+        const [status] = await parseJson('status 157897 --json');
+        expect(read.indexMessageId).toBe('-4317561145929622861');
+        expect(status.indexMessageId).toBe(read.indexMessageId);
+        expect(read.flagIndex).toBe(status.flagIndex);
+        expect(read.wasRepliedTo).toBe(status.wasRepliedTo);
     });
 });

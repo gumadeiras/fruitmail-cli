@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Features
+
+- Added `status <id...> --json` for per-message flag index, replied state, inbox membership, and the index message identifier, read from the index alone.
+- `read` and `inspect` return `indexMessageId`, the index's own identifier for the row, so callers can detect a reused row ID.
+
 ## 1.2.1 - 2026-09-19
 
 ### Features
