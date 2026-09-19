@@ -32,10 +32,14 @@ Requires Node.js 22.13 or newer for npm installs.
  npm install -g fruitmail
  ```
  
- **Using Bash (Zero dependency):**
+ **Using the legacy Bash CLI (search-focused; no inspect, read, status, or flag commands):**
  ```bash
- curl -sSL https://raw.githubusercontent.com/gumadeiras/fruitmail-cli/master/fruitmail | bash
+ curl -fsSL https://raw.githubusercontent.com/gumadeiras/fruitmail-cli/main/install.sh | bash
  ```
+
+Homebrew and npm install the full Node CLI used in the examples below. The
+standalone Bash CLI keeps its smaller search-focused command set for existing
+users.
  
  ## 🚀 Usage
  
