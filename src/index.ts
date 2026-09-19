@@ -126,6 +126,18 @@ function parseMessageId(value: unknown): number {
     return id;
 }
 
+/** A Mail flag index: -1 for unflagged, otherwise one of the seven colors. */
+function parseFlagIndex(value: unknown): number | undefined {
+    if (value === undefined) return undefined;
+    const text = String(value);
+    if (!/^-?\d+$/.test(text)) throw new Error('Invalid --expect-flag-index: expected an integer from -1 to 6');
+    const index = Number(text);
+    if (!(Object.values(MAIL_FLAG_INDEX) as number[]).includes(index)) {
+        throw new Error('Invalid --expect-flag-index: expected an integer from -1 to 6');
+    }
+    return index;
+}
+
 function parseFlagColor(value: unknown): MailFlagColor {
     const color = String(value).toLowerCase();
     if (!Object.prototype.hasOwnProperty.call(MAIL_FLAG_INDEX, color)) {
@@ -678,13 +690,17 @@ program.command('inspect <id>')
 
 program.command('read <ids...>')
     .description('Read messages from the local Mail store without Mail.app')
+    .option('--max-body-chars <count>', 'Return at most this many body characters per message')
     .action(async (ids: string[], options, command) => {
         const opts = getCommandOptions(options, command);
         try {
             const numericIds = ids.map(parseMessageId);
+            const maxBodyChars = options.maxBodyChars === undefined
+                ? Infinity
+                : parseNonNegativeIntegerOption(options.maxBodyChars, 'max-body-chars', 0);
             const { db, dbPath, cleanUp } = await getDb(opts);
             try {
-                const results = await readLocalMessages(db, dbPath, numericIds);
+                const results = await readLocalMessages(db, dbPath, numericIds, maxBodyChars);
                 console.log(JSON.stringify(results.map((result) => (
                     'error' in result ? result : { ...result, mailbox: friendlyMailboxName(result.mailbox) }
                 )), null, 2));
@@ -700,16 +716,21 @@ program.command('read <ids...>')
 program.command('set-flag <id> <color>')
     .description('Set or clear one message flag in Mail.app')
     .option('--expect-message-id <messageId>', 'Fail unless the found message carries this Message-ID')
+    .option('--expect-flag-index <index>', 'Fail unless the message currently has this flag index (-1 when unflagged)')
     .action(async (id, color, options, command) => {
         const opts = getCommandOptions(options, command);
         try {
             const numericId = parseMessageId(id);
             const parsedColor = parseFlagColor(color);
+            const expectedFlagIndex = parseFlagIndex(options.expectFlagIndex);
             const { db, cleanUp } = await getDb(opts);
             try {
                 const lookup = buildMessageLookupContext(db, String(numericId));
                 if (!lookup) throw new Error('Message not found');
-                const flagResult = await setEmailFlagByLookup({ ...lookup, expectedMessageId: options.expectMessageId }, parsedColor);
+                const flagResult = await setEmailFlagByLookup(
+                    { ...lookup, expectedMessageId: options.expectMessageId, expectedFlagIndex },
+                    parsedColor
+                );
                 const result = { id: numericId, ...flagResult };
                 if (opts.json) {
                     console.log(JSON.stringify(result, null, 2));

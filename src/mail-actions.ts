@@ -2,6 +2,7 @@ import { type ChildProcess, execFile } from 'node:child_process';
 
 const NOT_FOUND_SENTINEL = '__FRUITMAIL_NOT_FOUND__';
 const IDENTITY_MISMATCH_SENTINEL = '__FRUITMAIL_IDENTITY_MISMATCH__';
+const FLAG_MISMATCH_SENTINEL = '__FRUITMAIL_FLAG_MISMATCH__';
 const SCRIPT_ERROR_SENTINEL = '__FRUITMAIL_SCRIPT_ERROR__';
 const OUTPUT_LIMIT_BYTES = 64 * 1024 * 1024;
 
@@ -46,6 +47,12 @@ export interface MailLookupContext {
   sender?: string;
   /** When set, the found message must carry this Message-ID or the lookup reports an identity mismatch. */
   expectedMessageId?: string;
+  /**
+   * When set, a flag change happens only if the message's current flag index
+   * (-1 when unflagged) equals this value; otherwise the lookup reports a flag
+   * mismatch. The check runs in the same AppleScript call as the change.
+   */
+  expectedFlagIndex?: number;
 }
 
 type LookupMode = 'open' | 'body' | 'inspect' | 'setFlag';
@@ -62,7 +69,9 @@ function toAppleScriptNumberList(values: number[]): string {
   return `{${values.map((value) => `${value}`).join(', ')}}`;
 }
 
-function normalizeLookupContext(context: MailLookupContext): Required<MailLookupContext> {
+type NormalizedLookupContext = Required<Omit<MailLookupContext, 'expectedFlagIndex'>> & { expectedFlagIndex: number | null };
+
+function normalizeLookupContext(context: MailLookupContext): NormalizedLookupContext {
   const unique = (values: string[] | undefined) => Array.from(new Set(
     (values ?? []).map((value) => value.trim()).filter((value) => value.length > 0)
   ));
@@ -78,7 +87,8 @@ function normalizeLookupContext(context: MailLookupContext): Required<MailLookup
     numericIdCandidates,
     subject: (context.subject ?? '').trim(),
     sender: (context.sender ?? '').trim(),
-    expectedMessageId: (context.expectedMessageId ?? '').trim().replace(/^<|>$/g, '')
+    expectedMessageId: (context.expectedMessageId ?? '').trim().replace(/^<|>$/g, ''),
+    expectedFlagIndex: Number.isInteger(context.expectedFlagIndex) ? context.expectedFlagIndex as number : null
   };
 }
 
@@ -135,8 +145,13 @@ function inspectResultScript(): string {
         return my makeInspectionJson(messageIdValue, subjectValue, senderValue, recipientValues, mailboxValue, bodyValue, headersValue, wasRepliedToValue, flagIndexValue)`;
 }
 
-function setFlagResultScript(color: MailFlagColor): string {
+function setFlagResultScript(color: MailFlagColor, expectedFlagIndex: number | null): string {
   const flagIndex = MAIL_FLAG_INDEX[color];
+  const precondition = expectedFlagIndex === null ? '' : `
+        if currentFlagIndex is not ${expectedFlagIndex} then
+          return "${FLAG_MISMATCH_SENTINEL}"
+        end if
+`;
   return `
         set targetFlagIndex to ${flagIndex}
         set didChange to false
@@ -147,7 +162,7 @@ function setFlagResultScript(color: MailFlagColor): string {
             set currentFlagIndex to flag index of foundMsg as integer
           end try
         end if
-
+${precondition}
         if targetFlagIndex is -1 then
           if isCurrentlyFlagged then
             set flagged status of foundMsg to false
@@ -232,7 +247,7 @@ export function buildLookupScript(context: MailLookupContext, mode: LookupMode, 
       ? 'open foundMsg\n        activate\n        return "OK"'
       : mode === 'inspect'
         ? inspectResultScript()
-        : setFlagResultScript(color as MailFlagColor);
+        : setFlagResultScript(color as MailFlagColor, normalized.expectedFlagIndex);
 
   const inspectionSupport = mode === 'inspect' ? `
     use framework "Foundation"
@@ -376,6 +391,8 @@ function runAppleScript(script: string): Promise<string> {
         reject(new Error('Message not found'));
       } else if (output.startsWith(IDENTITY_MISMATCH_SENTINEL)) {
         reject(new Error('Message identity mismatch'));
+      } else if (output.startsWith(FLAG_MISMATCH_SENTINEL)) {
+        reject(new Error('Message flag mismatch'));
       } else if (output.startsWith(SCRIPT_ERROR_SENTINEL)) {
         reject(new Error(`Mail AppleScript error: ${output.replace(SCRIPT_ERROR_SENTINEL, '')}`));
       } else {
@@ -385,7 +402,7 @@ function runAppleScript(script: string): Promise<string> {
   });
 }
 
-const PASSTHROUGH_ERRORS = new Set(['Message not found', 'Message identity mismatch']);
+const PASSTHROUGH_ERRORS = new Set(['Message not found', 'Message identity mismatch', 'Message flag mismatch']);
 
 async function runLookup<T>(
   context: MailLookupContext,

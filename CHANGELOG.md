@@ -6,7 +6,8 @@
 
 - Added `inspect <id> --json` for exact, stable message metadata, body, headers, reply state, and flag state. `dateReceived` is ISO 8601 from Mail's index.
 - Added `read <id...> --json` to read many messages from Mail's on-disk store without Mail.app, with the same keys as `inspect`.
-- Added `set-flag <id> <color> --json` to set or clear one Mail flag through AppleScript with idempotent results, the previous flag index, and no other message changes. `--expect-message-id` refuses the change when the message no longer carries that Message-ID.
+- Added `set-flag <id> <color> --json` to set or clear one Mail flag through AppleScript with idempotent results, the previous flag index, and no other message changes. `--expect-message-id` refuses the change when the message no longer carries that Message-ID, and `--expect-flag-index` refuses it when the message's current flag differs from the expected index; both checks run inside the same AppleScript call as the change.
+- Added `read --max-body-chars <n>` to bound each returned body.
 - Added `flag-counts --json` for a content-free mailbox-wide count of existing colored flags, read from the index without Mail.app.
 - Added `--offset` / `-o` to paginate search results based on PR #1. Thanks to @JakubPecenka.
 
@@ -21,6 +22,7 @@
 
 - Terminating `fruitmail` while Mail.app is still working now also stops the AppleScript it started, so Mail is not left busy.
 - Large message bodies no longer fail `inspect` or `body` with an output limit error.
+- `read` parses each `.emlx` file as a stream and discards attachment content without buffering it, so a message with large attachments no longer holds the whole file and every attachment in memory.
 - Fixed pnpm global installs by removing the native SQLite runtime binding (#2). Thanks to @Mytakeon for reporting this.
 - Fixed the standalone Bash CLI so `fruitmail search --subject ...` and other search flags are accepted (#3). Thanks to @Mytakeon for reporting this.
 

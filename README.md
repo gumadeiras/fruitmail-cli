@@ -68,6 +68,10 @@ Requires Node.js 22.13 or newer for npm installs.
  fruitmail set-flag 94695 purple --json
  fruitmail set-flag 94695 none --json
  fruitmail set-flag 94695 purple --expect-message-id id@example.com --json
+ fruitmail set-flag 94695 purple --expect-flag-index -1 --json
+
+ # Read many messages with each body cut to 12000 characters
+ fruitmail read 94695 94696 --json --max-body-chars 12000
 
  # Count colored flags without returning message content
  fruitmail flag-counts --json
@@ -90,8 +94,12 @@ Mail.app; a message that Mail no longer has under that ID is reported as
 and `flagIndex` from the index. An entry that cannot be read is
 `{ "id": <id>, "error": "..." }`: `Message not found` when the index has no
 live row, `No local message file` when Mail has not stored the message
-locally. `body` is the text part, or text converted from HTML when the
-message has no text part, so it can differ from Mail's own rendering.
+locally, `Unreadable local message file` when the file cannot be parsed.
+`body` is the text part, or text converted from HTML when the message has no
+text part, so it can differ from Mail's own rendering. The file is parsed as a
+stream and attachment content is discarded without being held in memory, so a
+message with large attachments does not fail the read. `--max-body-chars <n>`
+cuts each `body` to at most `n` characters.
 
 `set-flag <id> <color> --json` accepts `red`, `orange`, `yellow`, `green`,
 `blue`, `purple`, `gray`, or `none`. It returns `ok`, `id`, `color`,
@@ -100,8 +108,12 @@ Repeating an operation is safe and returns `changed: false` when Mail already
 has the requested state. With `--expect-message-id <id>`, the flag changes
 only if the message Mail resolves for that row ID still carries that
 Message-ID; otherwise the command fails with `Message identity mismatch` and
-changes nothing. Flag changes use Mail.app's AppleScript interface. They never
-move, copy, archive, delete, mark read, or mark junk.
+changes nothing. With `--expect-flag-index <n>`, the flag changes only if the
+message's current flag index is `n` (`-1` when unflagged); otherwise the
+command fails with `Message flag mismatch` and changes nothing. Both checks
+run inside the same AppleScript call as the change, so a flag another process
+sets in between is not overwritten. Flag changes use Mail.app's AppleScript
+interface. They never move, copy, archive, delete, mark read, or mark junk.
 
 `flag-counts --json` reads the flagged state and flag color from Mail's index
 without Mail.app. It returns total and flagged message counts, counts for all

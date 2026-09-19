@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { simpleParser, type AddressObject } from 'mailparser';
+import type { Readable } from 'node:stream';
+import { type AddressObject, type AttachmentStream, type Headers, MailParser, type MessageText } from 'mailparser';
 import { findColumnByAlias, getTableColumns, MESSAGE_FLAG_ANSWERED, messageFlagIndex, quoteIdentifier, unixSecondsToIso } from './db-schema.js';
 
 /**
@@ -82,35 +83,90 @@ export class LocalMessageStore {
     }
 }
 
-/** An emlx file is a decimal byte count, a newline, the RFC 822 message, then a property list. */
-export function readEmlxMessage(filePath: string): Buffer {
-    const file = fs.readFileSync(filePath);
-    const newline = file.indexOf(0x0a);
-    const length = newline > 0 ? Number.parseInt(file.subarray(0, newline).toString('ascii').trim(), 10) : NaN;
-    if (!Number.isSafeInteger(length) || length < 0 || newline + 1 + length > file.length) {
+/**
+ * An emlx file is a decimal byte count, a newline, the RFC 822 message, then a
+ * property list. The message is returned as a stream so a large message is
+ * never held in memory as a whole.
+ */
+export function openEmlxMessage(filePath: string): Readable {
+    const fd = fs.openSync(filePath, 'r');
+    let prefix: Buffer;
+    let size: number;
+    try {
+        prefix = Buffer.alloc(32);
+        const read = fs.readSync(fd, prefix, 0, prefix.length, 0);
+        prefix = prefix.subarray(0, read);
+        size = fs.fstatSync(fd).size;
+    } finally {
+        fs.closeSync(fd);
+    }
+    const newline = prefix.indexOf(0x0a);
+    const length = newline > 0 ? Number.parseInt(prefix.subarray(0, newline).toString('ascii').trim(), 10) : NaN;
+    if (!Number.isSafeInteger(length) || length < 0 || newline + 1 + length > size) {
         throw new Error('Malformed emlx file');
     }
-    return file.subarray(newline + 1, newline + 1 + length);
+    return fs.createReadStream(filePath, { start: newline + 1, end: newline + length });
 }
 
-function addressesOf(value: AddressObject | AddressObject[] | undefined): string[] {
-    const objects = Array.isArray(value) ? value : value ? [value] : [];
+function addressesOf(value: unknown): string[] {
+    const objects = Array.isArray(value) ? value as AddressObject[] : value ? [value as AddressObject] : [];
     return objects
         .flatMap((object) => object.value)
         .flatMap((entry) => entry.group ?? [entry])
         .flatMap((entry) => (entry.address ? [entry.address] : []));
 }
 
-export async function parseMessageContent(raw: Buffer): Promise<Pick<LocalMessage, 'messageId' | 'subject' | 'sender' | 'recipients' | 'body' | 'headers'>> {
-    const parsed = await simpleParser(raw, { skipImageLinks: true, skipTextToHtml: true });
-    return {
-        messageId: (parsed.messageId ?? '').trim().replace(/^<|>$/g, ''),
-        subject: parsed.subject ?? '',
-        sender: parsed.from?.text ?? '',
-        recipients: [...addressesOf(parsed.to), ...addressesOf(parsed.cc), ...addressesOf(parsed.bcc)],
-        body: parsed.text ?? '',
-        headers: parsed.headerLines.map((header) => header.line).join('\n')
-    };
+export type ParsedMessageContent = Pick<LocalMessage, 'messageId' | 'subject' | 'sender' | 'recipients' | 'body' | 'headers'>;
+
+/**
+ * Parses the message while it streams. Attachment content is discarded
+ * without being buffered; text parts are collected. `maxBodyChars` bounds the
+ * returned body.
+ */
+export function parseMessageContent(source: Readable | Buffer, maxBodyChars = Infinity): Promise<ParsedMessageContent> {
+    return new Promise((resolve, reject) => {
+        const parser = new MailParser({ skipImageLinks: true, skipTextToHtml: true });
+        let headers: Headers = new Map();
+        let headerLines = '';
+        let body = '';
+
+        const fail = (error: unknown) => {
+            parser.destroy();
+            reject(error instanceof Error ? error : new Error('Malformed message'));
+        };
+        parser.on('error', fail);
+        parser.on('headers', (value: Headers) => {
+            headers = value;
+            headerLines = (parser as unknown as { headerLines: Array<{ line: string }> }).headerLines
+                .map((header) => header.line).join('\n');
+        });
+        parser.on('data', (data: AttachmentStream | MessageText) => {
+            if (data.type === 'text') {
+                body = data.text ?? '';
+                return;
+            }
+            const content = data.content as Readable;
+            content.once('end', () => data.release());
+            content.once('error', fail);
+            content.resume();
+        });
+        parser.on('end', () => {
+            const messageId = headers.get('message-id');
+            const subject = headers.get('subject');
+            const sender = headers.get('from') as AddressObject | undefined;
+            resolve({
+                messageId: (typeof messageId === 'string' ? messageId : '').trim().replace(/^<|>$/g, ''),
+                subject: typeof subject === 'string' ? subject : '',
+                sender: sender?.text ?? '',
+                recipients: [...addressesOf(headers.get('to')), ...addressesOf(headers.get('cc')), ...addressesOf(headers.get('bcc'))],
+                body: body.slice(0, maxBodyChars),
+                headers: headerLines
+            });
+        });
+
+        if (Buffer.isBuffer(source)) parser.end(source);
+        else source.once('error', fail).pipe(parser);
+    });
 }
 
 interface IndexedRow {
@@ -122,7 +178,7 @@ interface IndexedRow {
     flagged?: number | null;
 }
 
-export async function readLocalMessages(db: any, dbPath: string, ids: number[]): Promise<LocalMessageResult[]> {
+export async function readLocalMessages(db: any, dbPath: string, ids: number[], maxBodyChars = Infinity): Promise<LocalMessageResult[]> {
     const mailboxColumns = getTableColumns(db, 'mailboxes');
     const urlColumn = findColumnByAlias(mailboxColumns, ['url']);
     if (!urlColumn) throw new Error('Mail database does not expose mailbox locations');
@@ -157,7 +213,7 @@ export async function readLocalMessages(db: any, dbPath: string, ids: number[]):
             continue;
         }
         try {
-            const content = await parseMessageContent(readEmlxMessage(filePath));
+            const content = await parseMessageContent(openEmlxMessage(filePath), maxBodyChars);
             results.push({
                 id,
                 ...content,

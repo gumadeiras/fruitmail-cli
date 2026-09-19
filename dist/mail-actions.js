@@ -12,6 +12,7 @@ exports.openEmailByRowId = openEmailByRowId;
 const node_child_process_1 = require("node:child_process");
 const NOT_FOUND_SENTINEL = '__FRUITMAIL_NOT_FOUND__';
 const IDENTITY_MISMATCH_SENTINEL = '__FRUITMAIL_IDENTITY_MISMATCH__';
+const FLAG_MISMATCH_SENTINEL = '__FRUITMAIL_FLAG_MISMATCH__';
 const SCRIPT_ERROR_SENTINEL = '__FRUITMAIL_SCRIPT_ERROR__';
 const OUTPUT_LIMIT_BYTES = 64 * 1024 * 1024;
 exports.MAIL_FLAG_INDEX = {
@@ -44,7 +45,8 @@ function normalizeLookupContext(context) {
         numericIdCandidates,
         subject: (context.subject ?? '').trim(),
         sender: (context.sender ?? '').trim(),
-        expectedMessageId: (context.expectedMessageId ?? '').trim().replace(/^<|>$/g, '')
+        expectedMessageId: (context.expectedMessageId ?? '').trim().replace(/^<|>$/g, ''),
+        expectedFlagIndex: Number.isInteger(context.expectedFlagIndex) ? context.expectedFlagIndex : null
     };
 }
 function inspectResultScript() {
@@ -99,8 +101,13 @@ function inspectResultScript() {
 
         return my makeInspectionJson(messageIdValue, subjectValue, senderValue, recipientValues, mailboxValue, bodyValue, headersValue, wasRepliedToValue, flagIndexValue)`;
 }
-function setFlagResultScript(color) {
+function setFlagResultScript(color, expectedFlagIndex) {
     const flagIndex = exports.MAIL_FLAG_INDEX[color];
+    const precondition = expectedFlagIndex === null ? '' : `
+        if currentFlagIndex is not ${expectedFlagIndex} then
+          return "${FLAG_MISMATCH_SENTINEL}"
+        end if
+`;
     return `
         set targetFlagIndex to ${flagIndex}
         set didChange to false
@@ -111,7 +118,7 @@ function setFlagResultScript(color) {
             set currentFlagIndex to flag index of foundMsg as integer
           end try
         end if
-
+${precondition}
         if targetFlagIndex is -1 then
           if isCurrentlyFlagged then
             set flagged status of foundMsg to false
@@ -192,7 +199,7 @@ function buildLookupScript(context, mode, color) {
             ? 'open foundMsg\n        activate\n        return "OK"'
             : mode === 'inspect'
                 ? inspectResultScript()
-                : setFlagResultScript(color);
+                : setFlagResultScript(color, normalized.expectedFlagIndex);
     const inspectionSupport = mode === 'inspect' ? `
     use framework "Foundation"
     use scripting additions
@@ -335,6 +342,9 @@ function runAppleScript(script) {
             else if (output.startsWith(IDENTITY_MISMATCH_SENTINEL)) {
                 reject(new Error('Message identity mismatch'));
             }
+            else if (output.startsWith(FLAG_MISMATCH_SENTINEL)) {
+                reject(new Error('Message flag mismatch'));
+            }
             else if (output.startsWith(SCRIPT_ERROR_SENTINEL)) {
                 reject(new Error(`Mail AppleScript error: ${output.replace(SCRIPT_ERROR_SENTINEL, '')}`));
             }
@@ -344,7 +354,7 @@ function runAppleScript(script) {
         });
     });
 }
-const PASSTHROUGH_ERRORS = new Set(['Message not found', 'Message identity mismatch']);
+const PASSTHROUGH_ERRORS = new Set(['Message not found', 'Message identity mismatch', 'Message flag mismatch']);
 async function runLookup(context, mode, parse, failure, color) {
     const script = buildLookupScript(context, mode, color);
     let output;

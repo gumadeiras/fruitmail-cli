@@ -249,6 +249,21 @@ describe('Mail Actions', () => {
             await expect(setEmailFlagByLookup({ numericIdCandidates: [123] }, 'red')).rejects.toThrow('Message not found');
         });
 
+        it('checks the current flag index inside the same script before any change', () => {
+            const script = buildLookupScript({ numericIdCandidates: [123], expectedFlagIndex: -1 }, 'setFlag', 'red');
+            const check = script.indexOf('if currentFlagIndex is not -1 then');
+            expect(check).toBeGreaterThan(script.indexOf('set currentFlagIndex to flag index of foundMsg'));
+            expect(check).toBeLessThan(script.indexOf('set flag index of foundMsg to targetFlagIndex'));
+            expect(script).toContain('return "__FRUITMAIL_FLAG_MISMATCH__"');
+            expect(buildLookupScript({ numericIdCandidates: [123] }, 'setFlag', 'red')).not.toContain('__FRUITMAIL_FLAG_MISMATCH__');
+        });
+
+        it('reports a flag mismatch instead of mutating', async () => {
+            mailReturns('__FRUITMAIL_FLAG_MISMATCH__');
+            await expect(setEmailFlagByLookup({ numericIdCandidates: [123], expectedFlagIndex: 2 }, 'red'))
+                .rejects.toThrow('Message flag mismatch');
+        });
+
         it('reports an identity mismatch instead of mutating', async () => {
             mailReturns('__FRUITMAIL_IDENTITY_MISMATCH__');
             await expect(setEmailFlagByLookup({ numericIdCandidates: [123], expectedMessageId: 'a@example.com' }, 'red'))
