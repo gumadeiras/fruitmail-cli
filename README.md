@@ -58,72 +58,36 @@ Requires Node.js 22.13 or newer for npm installs.
  # Open in Mail.app
  fruitmail open 94695
 
- # Inspect one exact message as stable JSON
+ # Inspect one exact message through Mail.app
  fruitmail inspect 94695 --json
 
- # Read many messages from the local store, without Mail.app
- fruitmail read 94695 94696 --json
+ # Read many local messages with bounded bodies
+ fruitmail read 94695 94696 --max-body-chars 12000 --json
 
- # Set or clear only that message's colored flag
- fruitmail set-flag 94695 purple --json
- fruitmail set-flag 94695 none --json
- fruitmail set-flag 94695 purple --expect-message-id id@example.com --json
- fruitmail set-flag 94695 purple --expect-flag-index -1 --json
-
- # Read many messages with each body cut to 12000 characters
- fruitmail read 94695 94696 --json --max-body-chars 12000
+ # Change only the flag, with optional atomic preconditions
+ fruitmail set-flag 94695 purple \
+   --expect-message-id id@example.com \
+   --expect-flag-index -1 \
+   --json
 
  # Count colored flags without returning message content
- fruitmail flag-counts --json
+ fruitmail flag-counts --inbox --json
  
  # Database stats
  fruitmail stats
  ```
 
-`inspect <id> --json` returns these stable keys: `id`, `messageId`,
-`subject`, `sender`, `recipients`, `dateReceived`, `mailbox`, `body`,
-`headers`, `wasRepliedTo`, and `flagIndex`. `dateReceived` is ISO 8601 from
-Mail's index. Missing Mail properties use an empty string, empty array,
-`false`, or `-1` as appropriate. The message is resolved by its row ID inside
-Mail.app; a message that Mail no longer has under that ID is reported as
-`Message not found`.
+`inspect` and `read` return stable JSON fields: `id`, `messageId`, `subject`,
+`sender`, `recipients`, `dateReceived`, `mailbox`, `body`, `headers`,
+`wasRepliedTo`, and `flagIndex`. `inspect` queries Mail.app. `read` uses the
+local store, preserves request order, and returns an error object (`{ "id":
+<id>, "error": "..." }`) for each unavailable message. Use
+`--max-body-chars` to bound each returned body.
 
-`read <id...> --json` returns one entry per requested ID with the same keys as
-`inspect`, in request order, without Mail.app. It locates each message's
-`.emlx` file from the index, parses the MIME content, and takes `wasRepliedTo`
-and `flagIndex` from the index. An entry that cannot be read is
-`{ "id": <id>, "error": "..." }`: `Message not found` when the index has no
-live row, `No local message file` when Mail has not stored the message
-locally, `Unreadable local message file` when the file cannot be parsed.
-`body` is the text part, or text converted from HTML when the message has no
-text part, so it can differ from Mail's own rendering. The file is parsed as a
-stream and attachment content is discarded without being held in memory, so a
-message with large attachments does not fail the read. `--max-body-chars <n>`
-cuts each `body` to at most `n` characters.
-
-`set-flag <id> <color> --json` accepts `red`, `orange`, `yellow`, `green`,
-`blue`, `purple`, `gray`, or `none`. It returns `ok`, `id`, `color`,
-`flagIndex`, `previousFlagIndex`, and `changed`. `none` clears the flag.
-Repeating an operation is safe and returns `changed: false` when Mail already
-has the requested state. With `--expect-message-id <id>`, the flag changes
-only if the message Mail resolves for that row ID still carries that
-Message-ID; otherwise the command fails with `Message identity mismatch` and
-changes nothing. With `--expect-flag-index <n>`, the flag changes only if the
-message's current flag index is `n` (`-1` when unflagged); otherwise the
-command fails with `Message flag mismatch` and changes nothing. Both checks
-run inside the same AppleScript call as the change, so a flag another process
-sets in between is not overwritten. Flag changes use Mail.app's AppleScript
-interface. They never move, copy, archive, delete, mark read, or mark junk.
-
-`flag-counts --json` reads the flagged state and flag color from Mail's index
-without Mail.app. It returns total and flagged message counts, counts for all
-seven colors, and an `unresolved` count of flagged messages whose color bits
-fall outside the seven colors. It never returns message identity or content.
-
-Mail keeps the flag color in bits 39 to 41 of the index's `flags` value,
-numbered like the AppleScript flag index: 0 red, 1 orange, 2 yellow, 3 green,
-4 blue, 5 purple, 6 gray. `read` and `flag-counts` use those bits; the
-`flag_color` column is 1 for every flagged message and carries no color.
+`set-flag` accepts any Mail flag color or `none`. Its optional Message-ID and
+flag-index preconditions are checked atomically with the change. It changes no
+other message state. `flag-counts` returns total, flagged, per-color, and
+unresolved counts without returning message identity or content.
 
 ## 📊 Performance
 
